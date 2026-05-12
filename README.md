@@ -2,9 +2,10 @@
 
 This repository contains a small PubMed ingestion tool. The main script fetches PubMed records that were added or updated in the last 24 hours, extracts a useful subset of fields, and stores them in a local SQLite database with deduplication by PMID.
 
-The project is centered around a single Python entrypoint:
+The project has two Python entrypoints:
 
 - `base.py`: main ingestion script
+- `embedding.py`: interactive semantic recommendation workflow built on top of the same PubMed/SQLite ingestion logic
 
 It uses Biopython's `Bio.Entrez` client by default and can optionally use external NCBI EDirect tools if they are installed, but EDirect is not required.
 
@@ -30,6 +31,52 @@ Example with a narrower search term:
 ```bash
 python base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
 ```
+
+## Semantic paper recommendations
+
+`embedding.py` adds a two-stage recommendation workflow:
+
+1. PubMed topic query for coarse retrieval:
+   it asks PubMed for all records added/updated in the past 24 hours matching a broad topic, using `datetype="edat"` and `reldate=1`. By default it adds `hasabstract[text]` so the embedding step has useful text.
+2. Embedding cosine similarity for personalized ranking:
+   it embeds the user's specific interest and every candidate paper's `Title: ...\nAbstract: ...`, then ranks papers by normalized dot product similarity.
+
+The default embedding model is the free/open-source `sentence-transformers/allenai-specter`, which is designed for scientific paper title + abstract embeddings and runs on CPU.
+
+Interactive example:
+
+```bash
+python embedding.py
+```
+
+Non-interactive example:
+
+```bash
+python embedding.py \
+  --db pubmed.sqlite \
+  --topic "cancer" \
+  --interest "single-cell genomics for early cancer biomarker discovery"
+```
+
+Useful options:
+
+```bash
+python embedding.py \
+  --db pubmed.sqlite \
+  --topic "genomics" \
+  --interest "genomic biomarkers for breast cancer prognosis" \
+  --top-k 10 \
+  --fetch-batch 200 \
+  --model-name sentence-transformers/allenai-specter
+```
+
+Disable the default abstract filter if you want PubMed to return records even when they lack abstracts:
+
+```bash
+python embedding.py --db pubmed.sqlite --topic "neuroscience" --no-has-abstract-filter
+```
+
+Use `--refresh` to replace existing rows for PMIDs fetched in the current run before inserting the newly fetched records.
 
 ## How `base.py` is structured
 
@@ -136,6 +183,7 @@ Current Python dependencies:
 
 - `biopython`
 - `numpy`
+- `sentence-transformers`
 
 System/runtime assumptions:
 
@@ -172,6 +220,14 @@ pip install -r requirements.txt
 python base.py --db pubmed.sqlite
 ```
 
+For semantic recommendations:
+
+```bash
+python embedding.py
+```
+
+The first embedding run may download the model from Hugging Face, so it needs internet access.
+
 ### Docker
 
 Build and run:
@@ -205,4 +261,5 @@ python -m unittest -v tests/test_base_smoke.py
 - EDirect is optional. The default code path uses Biopython and works without installing EDirect.
 - EDirect is not bundled in this repo.
 - The last-24-hours query can return a large number of records, so using `--max` is useful for smaller test runs.
+- `embedding.py` intentionally uses a broad PubMed keyword/query search first, then semantic embedding similarity for the final ranking. PubMed itself is not used as a semantic search engine.
 - The SQLite database is part of the workflow output, not a required source file.

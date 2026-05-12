@@ -48,7 +48,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.client import IncompleteRead
-from typing import Dict, Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 from urllib.error import HTTPError, URLError
 
 from Bio import Entrez
@@ -461,7 +461,42 @@ def edirect_available(prefix: List[str]) -> bool:
     return bool(shutil.which("esearch") and shutil.which("efetch"))
 
 
-def esearch_last_24h(cfg: NCBIConfig, term: str) -> tuple[int, str, str]:
+def _entrez_read_with_retries(open_request: Callable[[], object], label: str, max_retries: int = 3) -> object:
+    for attempt in range(max_retries):
+        handle = None
+        try:
+            handle = open_request()
+            return Entrez.read(handle)
+        except HTTPError as e:
+            retryable = e.code == 429 or 500 <= e.code < 600
+            if retryable and attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(
+                    f"[warn] {label} failed with HTTP {e.code}: {e.reason}. "
+                    f"Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...",
+                    file=sys.stderr,
+                )
+                time.sleep(wait_time)
+                continue
+            raise
+        except (IncompleteRead, URLError, ConnectionError, OSError) as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(
+                    f"[warn] {label} connection error: {type(e).__name__}: {e}. "
+                    f"Retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})...",
+                    file=sys.stderr,
+                )
+                time.sleep(wait_time)
+                continue
+            raise
+        finally:
+            if handle is not None:
+                handle.close()
+    raise RuntimeError(f"{label} failed after {max_retries} attempts.")
+
+
+def esearch_last_24h(cfg: NCBIConfig, term: str, max_retries: int = 3) -> tuple[int, str, str]:
     params = {
         "db": "pubmed",
         "term": term,
@@ -470,11 +505,7 @@ def esearch_last_24h(cfg: NCBIConfig, term: str) -> tuple[int, str, str]:
         "reldate": 1,
         "datetype": "edat",
     }
-    handle = Entrez.esearch(**params)
-    try:
-        data = Entrez.read(handle)
-    finally:
-        handle.close()
+    data = _entrez_read_with_retries(lambda: Entrez.esearch(**params), "ESearch history", max_retries)
     count = int(data.get("Count", 0))
     webenv = data.get("WebEnv")
     query_key = data.get("QueryKey")
@@ -483,7 +514,7 @@ def esearch_last_24h(cfg: NCBIConfig, term: str) -> tuple[int, str, str]:
     return count, str(webenv), str(query_key)
 
 
-def esearch_ids(term: str, retstart: int, retmax: int) -> List[str]:
+def esearch_ids(term: str, retstart: int, retmax: int, max_retries: int = 3) -> List[str]:
     params = {
         "db": "pubmed",
         "term": term,
@@ -492,11 +523,11 @@ def esearch_ids(term: str, retstart: int, retmax: int) -> List[str]:
         "reldate": 1,
         "datetype": "edat",
     }
-    handle = Entrez.esearch(**params)
-    try:
-        data = Entrez.read(handle)
-    finally:
-        handle.close()
+    data = _entrez_read_with_retries(
+        lambda: Entrez.esearch(**params),
+        f"ESearch IDs retstart={retstart}",
+        max_retries,
+    )
     return [str(i) for i in data.get("IdList", [])]
 
 
