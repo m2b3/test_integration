@@ -7,11 +7,17 @@ From: python:3.12-slim
 
 %post
     set -eu
-    pip install --no-cache-dir -r /opt/infogather/requirements.txt
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl
+    rm -rf /var/lib/apt/lists/*
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="/root/.local/bin:$PATH"
+    uv pip install --system --no-cache -r /opt/infogather/requirements.txt
 
 %environment
     export PYTHONDONTWRITEBYTECODE=1
     export PYTHONUNBUFFERED=1
+    export PATH="/root/.local/bin:$PATH"
 
 %runscript
     cd "$PWD"
