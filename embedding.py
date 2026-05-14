@@ -17,17 +17,6 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
 import numpy as np
-from base import (
-    chunked,
-    configure_entrez,
-    efetch_pubmed_batch,
-    esearch_last_24h,
-    existing_pmids,
-    get_ncbi_config,
-    init_db,
-    insert_articles,
-    load_dotenv,
-)
 
 DEFAULT_DB_PATH = "pubmed.sqlite"
 DEFAULT_INDEX_PATH = "paper_specter.index"
@@ -50,6 +39,11 @@ def format_seconds(seconds: float) -> str:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def chunked(seq: list[Any], n: int) -> Iterable[list[Any]]:
+    for i in range(0, len(seq), n):
+        yield seq[i : i + n]
 
 
 def _load_faiss():
@@ -95,6 +89,10 @@ def _split_pubmed_query_by_uid_range(
 ) -> list[tuple[str, int, str, str]]:
     pending: list[tuple[int, int]] = [(1, PUBMED_MAX_UID)]
     chunks: list[tuple[int, str, int, str, str]] = []
+    try:
+        from base import esearch_last_24h
+    except ImportError as exc:
+        raise RuntimeError("PubMed fetching requires dependencies from requirements.txt.") from exc
 
     while pending:
         low_uid, high_uid = pending.pop()
@@ -132,6 +130,18 @@ def fetch_pubmed_last24h_all(
         raise ValueError("--fetch-batch must be greater than 0.")
     if fetch_retries <= 0:
         raise ValueError("--fetch-retries must be greater than 0.")
+
+    try:
+        from base import (
+            efetch_pubmed_batch,
+            esearch_last_24h,
+            existing_pmids,
+            get_ncbi_config,
+            init_db,
+            insert_articles,
+        )
+    except ImportError as exc:
+        raise RuntimeError("PubMed fetching requires dependencies from requirements.txt.") from exc
 
     cfg = get_ncbi_config()
     conn = init_db(db_path)
@@ -237,6 +247,41 @@ def load_articles_by_pmids(conn: sqlite3.Connection, pmids: list[str]) -> list[d
             rows_by_pmid[str(article["pmid"])] = article
 
     return [rows_by_pmid[pmid] for pmid in unique if pmid in rows_by_pmid]
+
+
+def load_articles_from_existing_db(db_path: str) -> list[dict[str, Any]]:
+    if not os.path.exists(db_path):
+        raise RuntimeError(f"SQLite database not found: {db_path}")
+
+    columns = [
+        "pmid",
+        "title",
+        "journal",
+        "pub_date",
+        "doi",
+        "authors",
+        "abstract",
+        "fetched_at",
+        "raw_json",
+    ]
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            table = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='pubmed_articles'"
+            ).fetchone()
+            if table is None:
+                raise RuntimeError(f"SQLite database has no pubmed_articles table: {db_path}")
+
+            rows = conn.execute(
+                f"SELECT {', '.join(columns)} FROM pubmed_articles ORDER BY pmid"
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Could not read SQLite database `{db_path}`: {exc}") from exc
+
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def build_paper_text(title: str | None, abstract: str | None) -> str:
@@ -360,6 +405,11 @@ def save_index_artifacts(
 
 def build_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     start_total = time.perf_counter()
+    try:
+        from base import configure_entrez, get_ncbi_config, init_db, load_dotenv
+    except ImportError as exc:
+        raise RuntimeError("PubMed fetching requires dependencies from requirements.txt.") from exc
+
     load_dotenv()
     cfg = get_ncbi_config()
     configure_entrez(cfg, max_tries=None, sleep_between_tries=None)
@@ -443,6 +493,80 @@ def build_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     print(f"- metadata path: {args.metadata_path}")
     print(f"- manifest path: {args.manifest_path}")
     print(f"- fetch time: {format_seconds(fetch_elapsed)}")
+    print(f"- embedding time: {format_seconds(embedding_elapsed)}")
+    print(f"- FAISS build time: {format_seconds(faiss_elapsed)}")
+    print(f"- total time: {format_seconds(total_elapsed)}")
+    return manifest
+
+
+def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    start_total = time.perf_counter()
+
+    start_load = time.perf_counter()
+    articles = load_articles_from_existing_db(args.build_from_existing_db)
+    load_elapsed = time.perf_counter() - start_load
+    if not articles:
+        raise RuntimeError(f"No rows found in pubmed_articles table: {args.build_from_existing_db}")
+
+    index_records = articles_to_index_records(articles)
+    skipped_count = len(articles) - len(index_records)
+    if not index_records:
+        raise RuntimeError("No eligible papers with abstracts were available for indexing.")
+
+    texts = [build_paper_text(record["title"], record["abstract"]) for record in index_records]
+
+    print(f"[info] Loaded {len(articles)} articles from {args.build_from_existing_db}")
+    print(f"[info] Encoding {len(texts)} papers with {args.model_name}")
+    start_embedding = time.perf_counter()
+    embeddings = encode_texts_with_specter(texts, args.model_name)
+    embedding_elapsed = time.perf_counter() - start_embedding
+
+    start_faiss = time.perf_counter()
+    index = build_faiss_index(embeddings)
+    faiss_elapsed = time.perf_counter() - start_faiss
+    total_elapsed = time.perf_counter() - start_total
+
+    manifest = {
+        "model_name": args.model_name,
+        "index_path": args.index_path,
+        "metadata_path": args.metadata_path,
+        "manifest_path": args.manifest_path,
+        "source": "existing_sqlite_db",
+        "db_path": args.build_from_existing_db,
+        "embedding_normalized": True,
+        "faiss_index_type": "IndexFlatIP",
+        "vector_dimension": int(embeddings.shape[1]),
+        "num_indexed_papers": len(index_records),
+        "num_loaded_articles": len(articles),
+        "num_skipped_papers": skipped_count,
+        "built_at": now_iso(),
+        "elapsed_seconds": {
+            "load_db": load_elapsed,
+            "embedding": embedding_elapsed,
+            "faiss_index": faiss_elapsed,
+            "total": total_elapsed,
+        },
+    }
+
+    save_index_artifacts(
+        index=index,
+        metadata=index_records,
+        manifest=manifest,
+        index_path=args.index_path,
+        metadata_path=args.metadata_path,
+        manifest_path=args.manifest_path,
+    )
+
+    print("\nBuild summary")
+    print(f"- source DB: {args.build_from_existing_db}")
+    print(f"- loaded articles: {len(articles)}")
+    print(f"- indexed papers: {len(index_records)}")
+    print(f"- skipped papers without enough text: {skipped_count}")
+    print(f"- model name: {args.model_name}")
+    print(f"- FAISS index path: {args.index_path}")
+    print(f"- metadata path: {args.metadata_path}")
+    print(f"- manifest path: {args.manifest_path}")
+    print(f"- DB load time: {format_seconds(load_elapsed)}")
     print(f"- embedding time: {format_seconds(embedding_elapsed)}")
     print(f"- FAISS build time: {format_seconds(faiss_elapsed)}")
     print(f"- total time: {format_seconds(total_elapsed)}")
@@ -617,6 +741,12 @@ def _parse_args() -> argparse.Namespace:
         description="Build and search a persistent SPECTER FAISS index for PubMed past-24h papers."
     )
     parser.add_argument("--build-index", action="store_true", help="Build the PubMed past-24h SPECTER FAISS index")
+    parser.add_argument(
+        "--build-from-existing-db",
+        metavar="DB_PATH",
+        default="",
+        help="Build the SPECTER FAISS index from an existing pubmed_articles SQLite database without fetching PubMed",
+    )
     parser.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
     parser.add_argument(
         "--index-path",
@@ -657,12 +787,19 @@ def main() -> int:
     args = _parse_args()
 
     try:
-        if not args.build_index and not args.interest:
-            print("Choose a mode: run `python embedding.py --build-index` or `python embedding.py --interest \"...\"`.")
+        if not args.build_index and not args.build_from_existing_db and not args.interest:
+            print(
+                "Choose a mode: run `python embedding.py --build-index`, "
+                "`python embedding.py --build-from-existing-db pubmed.sqlite`, "
+                "or `python embedding.py --interest \"...\"`."
+            )
             return 1
 
         if args.build_index:
             build_index_pipeline(args)
+
+        if args.build_from_existing_db:
+            build_index_from_existing_db_pipeline(args)
 
         if args.interest:
             search_index_pipeline(args)

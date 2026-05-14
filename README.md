@@ -75,6 +75,12 @@ python embedding.py \
   --limit 10
 ```
 
+Build an index from an existing local PubMed SQLite database without fetching PubMed:
+
+```bash
+python embedding.py --build-from-existing-db pubmed.sqlite
+```
+
 Custom artifact paths:
 
 ```bash
@@ -240,6 +246,7 @@ For semantic recommendations:
 
 ```bash
 python embedding.py --build-index
+python embedding.py --build-from-existing-db pubmed.sqlite
 python embedding.py --interest "single-cell genomics for early cancer biomarker discovery" --limit 10
 ```
 
@@ -253,6 +260,12 @@ Docker packages the project dependencies into a reproducible local container. It
 docker build -t infogather .
 docker run --rm -v "$PWD:/work" -w /work infogather --build-index \
   --db /work/pubmed.sqlite \
+  --index-path /work/paper_specter.index \
+  --metadata-path /work/paper_metadata.json \
+  --manifest-path /work/paper_index_manifest.json
+
+docker run --rm -v "$PWD:/work" -w /work infogather \
+  --build-from-existing-db /work/pubmed.sqlite \
   --index-path /work/paper_specter.index \
   --metadata-path /work/paper_metadata.json \
   --manifest-path /work/paper_index_manifest.json
