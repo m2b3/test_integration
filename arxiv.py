@@ -2,21 +2,24 @@
 Fetch arXiv papers updated/submitted in the last 24 hours and store them into
 a SQLite database with deduping by canonical arXiv ID.
 
-- Uses the arXiv Atom API with sortBy=lastUpdatedDate
+- Uses arXiv OAI-PMH by default for metadata harvesting
+- Uses the arXiv Atom API only when --query is supplied
 - Dedupe = arxiv_id primary key in SQLite
-- Fetch window = locally filtered UTC cutoff of now - 24 hours
-- Batches through results with start and max_results
+- Fetch window = OAI-PMH datestamps from yesterday/today, locally filtered
+- Batches through OAI-PMH resumption tokens or Atom API start/max_results
 
 Usage:
   python arxiv.py --db arxiv.sqlite
   python arxiv.py --db arxiv.sqlite --max 500
+  python arxiv.py --db arxiv.sqlite --query "cat:cs.CL"
 
 Notes:
-  - arXiv's API can sort by lastUpdatedDate, but its query syntax does not
-    perfectly express "updated in the past 24 hours" for every use case. This
-    script therefore fetches pages sorted by update time and filters locally.
-  - The default query uses a UTC submittedDate window to avoid asking arXiv to
-    sort the whole archive, which can trigger HTTP 429 rate limits.
+  - arXiv's bulk-data guidance says OAI-PMH is preferred for bulk metadata and
+    incremental synchronization.
+  - OAI-PMH datestamps represent record modification dates, not necessarily
+    article submission or replacement dates.
+  - OAI-PMH exposes day-level datestamps, so a "last 24h" harvest requests from
+    yesterday's UTC date and locally keeps records with matching datestamps.
 """
 
 from __future__ import annotations
@@ -35,11 +38,20 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.error import HTTPError, URLError
 
 ARXIV_API_URL = "https://export.arxiv.org/api/query"
+ARXIV_OAI_URL = "https://oaipmh.arxiv.org/oai"
 DEFAULT_QUERY = ""
 ATOM_NS = "http://www.w3.org/2005/Atom"
 ARXIV_NS = "http://arxiv.org/schemas/atom"
+OAI_NS = "http://www.openarchives.org/OAI/2.0/"
+OAI_ARXIV_NS = "http://arxiv.org/OAI/arXiv/"
 OPENSEARCH_NS = "http://a9.com/-/spec/opensearch/1.1/"
-NS = {"atom": ATOM_NS, "arxiv": ARXIV_NS, "opensearch": OPENSEARCH_NS}
+NS = {
+    "atom": ATOM_NS,
+    "arxiv": ARXIV_NS,
+    "oai": OAI_NS,
+    "oai_arxiv": OAI_ARXIV_NS,
+    "opensearch": OPENSEARCH_NS,
+}
 
 @dataclass
 class FetchStats:
@@ -58,6 +70,10 @@ def arxiv_query_datetime(dt: datetime) -> str:
 
 def default_query_for_window(cutoff_utc: datetime, now_utc: datetime) -> str:
     return f"submittedDate:[{arxiv_query_datetime(cutoff_utc)} TO {arxiv_query_datetime(now_utc)}]"
+
+
+def oai_date(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).date().isoformat()
 
 
 def chunked(seq: List[str], n: int) -> Iterable[List[str]]:
@@ -200,8 +216,18 @@ def normalize_arxiv_id(raw_id: Optional[str]) -> Optional[str]:
         value = value.rsplit("/pdf/", 1)[1]
     value = value.split("?", 1)[0].split("#", 1)[0].strip().strip("/")
     value = re.sub(r"\.pdf$", "", value, flags=re.IGNORECASE)
+    if value.startswith("oai:arXiv.org:"):
+        value = value.removeprefix("oai:arXiv.org:")
     value = re.sub(r"v\d+$", "", value)
     return value or None
+
+
+def arxiv_abs_url(arxiv_id: str) -> str:
+    return f"https://arxiv.org/abs/{arxiv_id}"
+
+
+def arxiv_pdf_url(arxiv_id: str) -> str:
+    return f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
 
 def parse_arxiv_entry(entry: ET.Element) -> Dict[str, object]:
@@ -281,6 +307,32 @@ def build_arxiv_url(query: str, start: int, max_results: int) -> str:
     return f"{ARXIV_API_URL}?{urllib.parse.urlencode(params)}"
 
 
+def build_oai_url(
+    *,
+    from_date: Optional[str] = None,
+    until_date: Optional[str] = None,
+    set_spec: Optional[str] = None,
+    resumption_token: Optional[str] = None,
+) -> str:
+    if resumption_token:
+        params = {
+            "verb": "ListRecords",
+            "resumptionToken": resumption_token,
+        }
+    else:
+        params = {
+            "verb": "ListRecords",
+            "metadataPrefix": "arXiv",
+        }
+        if from_date:
+            params["from"] = from_date
+        if until_date:
+            params["until"] = until_date
+        if set_spec:
+            params["set"] = set_spec
+    return f"{ARXIV_OAI_URL}?{urllib.parse.urlencode(params)}"
+
+
 def fetch_url_with_retries(url: str, max_retries: int, label: str) -> bytes:
     headers = {"User-Agent": "arxiv_last24h_to_sqlite/1.0 (Python urllib)"}
     for attempt in range(max_retries):
@@ -338,6 +390,122 @@ def parse_arxiv_feed(xml_bytes: bytes) -> ET.Element:
     except ET.ParseError as e:
         print(f"[error] XML parse error: {e}", file=sys.stderr)
         raise
+
+
+def parse_oai_errors(feed: ET.Element) -> List[Tuple[str, str]]:
+    errors: List[Tuple[str, str]] = []
+    for error in feed.findall("oai:error", namespaces=NS):
+        code = error.attrib.get("code", "")
+        message = normalize_space(error.text) or ""
+        errors.append((code, message))
+    return errors
+
+
+def parse_oai_datestamp(value: Optional[str]) -> Optional[datetime]:
+    raw = normalize_space(value)
+    if not raw:
+        return None
+    if "T" not in raw:
+        raw = f"{raw}T00:00:00+00:00"
+    return parse_arxiv_datetime(raw)
+
+
+def xml_local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.rsplit("}", 1)[1]
+    return tag
+
+
+def find_child_by_local_name(parent: Optional[ET.Element], name: str) -> Optional[ET.Element]:
+    if parent is None:
+        return None
+    for child in parent:
+        if xml_local_name(child.tag) == name:
+            return child
+    return None
+
+
+def find_children_by_local_name(parent: Optional[ET.Element], name: str) -> List[ET.Element]:
+    if parent is None:
+        return []
+    return [child for child in parent if xml_local_name(child.tag) == name]
+
+
+def oai_text(parent: Optional[ET.Element], name: str) -> Optional[str]:
+    if parent is None:
+        return None
+    text = normalize_space(parent.findtext(f"oai_arxiv:{name}", namespaces=NS))
+    if text:
+        return text
+    child = find_child_by_local_name(parent, name)
+    return normalize_space(child.text if child is not None else None)
+
+
+def parse_oai_author(author: ET.Element) -> Optional[str]:
+    keyname = oai_text(author, "keyname")
+    forenames = oai_text(author, "forenames")
+    suffix = oai_text(author, "suffix")
+    parts = [part for part in (forenames, keyname, suffix) if part]
+    if parts:
+        return normalize_space(" ".join(parts))
+    return normalize_space(author.text)
+
+
+def parse_oai_arxiv_record(record: ET.Element) -> Dict[str, object]:
+    header = record.find("oai:header", namespaces=NS)
+    if header is None:
+        raise ValueError("missing OAI header")
+    if (header.attrib.get("status") or "").lower() == "deleted":
+        raise ValueError("deleted OAI record")
+
+    identifier = normalize_space(header.findtext("oai:identifier", namespaces=NS))
+    datestamp = normalize_space(header.findtext("oai:datestamp", namespaces=NS))
+    metadata = record.find("oai:metadata", namespaces=NS)
+    arxiv_meta = metadata.find("oai_arxiv:arXiv", namespaces=NS) if metadata is not None else None
+    if arxiv_meta is None:
+        arxiv_meta = find_child_by_local_name(metadata, "arXiv")
+    if arxiv_meta is None:
+        raise ValueError("missing arXiv OAI metadata")
+
+    arxiv_id = normalize_arxiv_id(oai_text(arxiv_meta, "id") or identifier)
+    if not arxiv_id:
+        raise ValueError("missing arXiv ID")
+
+    authors_el = arxiv_meta.find("oai_arxiv:authors", namespaces=NS)
+    if authors_el is None:
+        authors_el = find_child_by_local_name(arxiv_meta, "authors")
+    authors = []
+    if authors_el is not None:
+        author_elements = authors_el.findall("oai_arxiv:author", namespaces=NS)
+        if not author_elements:
+            author_elements = find_children_by_local_name(authors_el, "author")
+        authors = [
+            author
+            for author in (parse_oai_author(el) for el in author_elements)
+            if author
+        ]
+
+    categories = (oai_text(arxiv_meta, "categories") or "").split()
+    updated_date = oai_text(arxiv_meta, "updated") or datestamp
+    fetched_at = utc_now_iso()
+
+    return {
+        "arxiv_id": arxiv_id,
+        "title": oai_text(arxiv_meta, "title"),
+        "journal": oai_text(arxiv_meta, "journal-ref"),
+        "pub_date": oai_text(arxiv_meta, "created"),
+        "updated_date": updated_date,
+        "doi": oai_text(arxiv_meta, "doi"),
+        "authors": authors,
+        "abstract": oai_text(arxiv_meta, "abstract"),
+        "categories": categories,
+        "primary_category": categories[0] if categories else None,
+        "url": arxiv_abs_url(arxiv_id),
+        "pdf_url": arxiv_pdf_url(arxiv_id),
+        "fetched_at": fetched_at,
+        "oai_identifier": identifier,
+        "oai_datestamp": datestamp,
+    }
 
 
 def filter_date_for_record(record: Dict[str, object]) -> Optional[datetime]:
@@ -438,6 +606,93 @@ def fetch_arxiv_last_24h(
     return records, stats
 
 
+def fetch_oai_last_24h(
+    *,
+    set_spec: str = "",
+    max_records: int = 0,
+    sleep_seconds: float = 3.0,
+    max_retries: int = 3,
+) -> Tuple[List[Dict[str, object]], FetchStats]:
+    now_utc = datetime.now(timezone.utc).replace(microsecond=0)
+    cutoff_utc = now_utc - timedelta(hours=24)
+    from_date = oai_date(cutoff_utc)
+    records: List[Dict[str, object]] = []
+    stats = FetchStats()
+    resumption_token: Optional[str] = None
+    page_number = 0
+
+    print(f"[info] OAI-PMH ListRecords metadataPrefix=arXiv from={from_date}")
+    if set_spec:
+        print(f"[info] OAI-PMH set={set_spec}")
+    print(f"[info] UTC now={now_utc.isoformat()} cutoff={cutoff_utc.isoformat()}")
+    print("[info] OAI-PMH datestamps are record modification dates, not submission dates.")
+
+    while True:
+        url = build_oai_url(
+            from_date=from_date,
+            set_spec=set_spec.strip() or None,
+            resumption_token=resumption_token,
+        )
+        label = "arXiv OAI-PMH ListRecords"
+        xml_bytes = fetch_url_with_retries(url, max_retries=max_retries, label=label)
+        feed = parse_arxiv_feed(xml_bytes)
+        errors = parse_oai_errors(feed)
+        if errors:
+            if all(code == "noRecordsMatch" for code, _message in errors):
+                print("[info] OAI-PMH returned noRecordsMatch; stopping.")
+                break
+            formatted = "; ".join(f"{code}: {message}" for code, message in errors)
+            raise RuntimeError(f"OAI-PMH error: {formatted}")
+
+        oai_records = feed.findall("oai:ListRecords/oai:record", namespaces=NS)
+        if not oai_records:
+            print("[warn] No OAI-PMH records returned; stopping.")
+            break
+
+        page_number += 1
+        page_records: List[Dict[str, object]] = []
+        page_parse_errors = 0
+
+        for oai_record in oai_records:
+            if max_records and stats.total_seen >= max_records:
+                break
+            stats.total_seen += 1
+            try:
+                record = parse_oai_arxiv_record(oai_record)
+            except ValueError as exc:
+                if str(exc) != "deleted OAI record":
+                    page_parse_errors += 1
+                    print(f"[warn] Failed to parse OAI-PMH record: {exc}", file=sys.stderr)
+                continue
+
+            datestamp_dt = parse_oai_datestamp(str(record.get("oai_datestamp") or ""))
+            if datestamp_dt is not None and datestamp_dt.date() >= cutoff_utc.date():
+                page_records.append(record)
+
+        records.extend(page_records)
+        stats.total_kept_last24h += len(page_records)
+
+        print(
+            f"[page] oai_page={page_number} fetched={len(oai_records)} kept_datestamp_window={len(page_records)} "
+            f"parse_errors={page_parse_errors} total_seen={stats.total_seen}"
+        )
+
+        if max_records and stats.total_seen >= max_records:
+            print(f"[info] Applying cap --max={max_records}; stopping fetch.")
+            break
+
+        token_el = feed.find("oai:ListRecords/oai:resumptionToken", namespaces=NS)
+        resumption_token = normalize_space(token_el.text if token_el is not None else None)
+        if not resumption_token:
+            print("[info] Reached end of OAI-PMH result set; stopping.")
+            break
+
+        if sleep_seconds > 0:
+            time.sleep(sleep_seconds)
+
+    return records, stats
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite database path")
@@ -445,10 +700,11 @@ def main() -> int:
         "--query",
         default=DEFAULT_QUERY,
         help=(
-            "arXiv API search query. Default is a UTC submittedDate window for the last 24 hours; "
-            "results are sorted by lastUpdatedDate and locally filtered."
+            "Optional arXiv Atom API search query. When omitted, metadata is harvested via OAI-PMH "
+            "as recommended for bulk/incremental metadata access."
         ),
     )
+    ap.add_argument("--oai-set", default="", help="Optional OAI-PMH setSpec, e.g. cs:cs:AI or physics")
     ap.add_argument("--fetch-batch", type=int, default=100, help="Batch size for arXiv API requests")
     ap.add_argument("--max", type=int, default=0, help="Optional cap on total API entries processed (0 = no cap)")
     ap.add_argument("--sleep", type=float, default=3.0, help="Seconds to sleep between arXiv API requests")
@@ -474,14 +730,24 @@ def main() -> int:
     conn: Optional[sqlite3.Connection] = None
     try:
         conn = init_db(args.db)
-        records, stats = fetch_arxiv_last_24h(
-            args.query,
-            start_from=args.start_from,
-            fetch_batch=args.fetch_batch,
-            max_records=args.max,
-            sleep_seconds=args.sleep,
-            max_retries=args.max_retries,
-        )
+        if args.query.strip():
+            records, stats = fetch_arxiv_last_24h(
+                args.query,
+                start_from=args.start_from,
+                fetch_batch=args.fetch_batch,
+                max_records=args.max,
+                sleep_seconds=args.sleep,
+                max_retries=args.max_retries,
+            )
+        else:
+            if args.start_from:
+                print("[warn] --start-from applies only to Atom API --query mode; ignoring for OAI-PMH.", file=sys.stderr)
+            records, stats = fetch_oai_last_24h(
+                set_spec=args.oai_set,
+                max_records=args.max,
+                sleep_seconds=args.sleep,
+                max_retries=args.max_retries,
+            )
 
         arxiv_ids = [str(r["arxiv_id"]) for r in records if r.get("arxiv_id")]
         already = existing_arxiv_ids(conn, arxiv_ids)
