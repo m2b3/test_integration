@@ -1,13 +1,17 @@
 # infogather
 
-This repository contains a small PubMed ingestion tool. The main script fetches PubMed records that were added or updated in the last 24 hours, extracts a useful subset of fields, and stores them in a local SQLite database with deduplication by PMID.
+This repository contains small ingestion tools for scientific paper metadata. The PubMed script fetches records that were added or updated in the last 24 hours, extracts a useful subset of fields, and stores them in a local SQLite database with deduplication by PMID. The OSF preprint scripts fetch recent PsyArXiv and SocArXiv records into a shared SQLite schema. The OpenReview script fetches visible submissions for a specific venue into SQLite.
 
-The project has two Python entrypoints:
+The project has several Python entrypoints:
 
 - `base.py`: main ingestion script
 - `embedding.py`: interactive semantic recommendation workflow built on top of the same PubMed/SQLite ingestion logic
+- `psyarxiv.py`: fetch recent PsyArXiv preprints into SQLite
+- `socarxiv.py`: fetch recent SocArXiv preprints into SQLite
+- `osf_preprints.py`: shared OSF preprints API and SQLite helper logic used by the PsyArXiv and SocArXiv wrappers
+- `openreview.py`: fetch publicly visible OpenReview submissions for one venue into SQLite
 
-It uses Biopython's `Bio.Entrez` client by default and can optionally use external NCBI EDirect tools if they are installed, but EDirect is not required.
+The PubMed workflow uses Biopython's `Bio.Entrez` client by default and can optionally use external NCBI EDirect tools if they are installed, but EDirect is not required. The OSF preprint workflow uses `requests` against the OSF API v2. The OpenReview workflow uses `openreview-py` against the OpenReview API v2.
 
 ## What `base.py` does
 
@@ -31,6 +35,136 @@ Example with a narrower search term:
 ```bash
 python base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
 ```
+
+## OSF-hosted preprint ingestion
+
+`psyarxiv.py` and `socarxiv.py` fetch recent records from OSF-hosted preprint providers and write them into provider-specific SQLite databases. Both wrappers use the shared logic in `osf_preprints.py`.
+
+`osf_preprints.py` handles:
+
+- OSF API v2 preprint pagination
+- provider validation for `psyarxiv` and `socarxiv`
+- date-window filtering using published, created, or modified timestamps
+- normalization of title, abstract, authors, DOI, categories, public URL, PDF URL, and raw JSON
+- deduplicated SQLite inserts using `(source, external_id)` as the primary key
+- fallback to recent provider pages when OSF date filters are unavailable
+
+Fetch PsyArXiv preprints from the last 24 hours:
+
+```bash
+python psyarxiv.py --db psyarxiv.sqlite
+```
+
+Fetch SocArXiv preprints from the last 24 hours:
+
+```bash
+python socarxiv.py --db socarxiv.sqlite
+```
+
+Use a different UTC lookback window:
+
+```bash
+python psyarxiv.py --db psyarxiv.sqlite --hours 72
+python socarxiv.py --db socarxiv.sqlite --hours 72
+```
+
+Limit raw OSF records fetched for a smaller test run:
+
+```bash
+python psyarxiv.py --db psyarxiv.sqlite --max-results 500
+python socarxiv.py --db socarxiv.sqlite --max-results 500
+```
+
+Apply a simple local text filter after fetching normalized records:
+
+```bash
+python psyarxiv.py --db psyarxiv.sqlite --query "cognitive bias"
+python socarxiv.py --db socarxiv.sqlite --query "social inequality"
+```
+
+Preview normalized records without writing to SQLite:
+
+```bash
+python psyarxiv.py --dry-run
+python socarxiv.py --dry-run
+```
+
+The OSF SQLite schema is a single `papers` table with:
+
+- `source`
+- `external_id`
+- `title`
+- `abstract`
+- `authors`
+- `published_date`
+- `updated_date`
+- `doi`
+- `journal`
+- `categories`
+- `url`
+- `pdf_url`
+- `fetched_at`
+- `raw_json`
+
+## OpenReview venue ingestion
+
+`openreview.py` fetches publicly visible submissions for a single OpenReview venue and saves them into `openreview.sqlite`.
+
+It handles:
+
+- venue parsing from either an OpenReview venue URL or a raw venue ID
+- automatic discovery of the venue's submission invitation
+- optional manual submission invitation selection with `--invitation`
+- fetching visible notes through OpenReview API v2
+- normalization of paper metadata, authors, PDF URL, venue fields, decisions, readers, and raw content
+- lightweight classification into `accepted`, `rejected`, `desk_rejected`, `withdrawn`, `submitted`, or `unknown`
+- printing the exact final invitation used after fetching submissions
+
+Fetch submissions by raw venue ID:
+
+```bash
+python openreview.py "ICLR.cc/2026/Conference"
+```
+
+Fetch submissions by OpenReview venue URL:
+
+```bash
+python openreview.py "https://openreview.net/group?id=ICLR.cc/2026/Conference#tab-accept-oral"
+```
+
+Provide a known submission invitation directly:
+
+```bash
+python openreview.py "ICLR.cc/2026/Conference" --invitation "ICLR.cc/2026/Conference/-/Blind_Submission"
+```
+
+When `--invitation` is provided, the script skips automatic invitation discovery but still parses and saves the `venue_id` from the positional venue argument. In both modes it prints:
+
+```text
+Invitation used: <actual invitation>
+```
+
+The OpenReview SQLite schema is a single `papers` table with:
+
+- `id`
+- `source`
+- `forum`
+- `number`
+- `title`
+- `authors`
+- `abstract`
+- `pdf_url`
+- `venue_id`
+- `venue`
+- `venueid`
+- `decision`
+- `status`
+- `presentation`
+- `readers`
+- `cdate`
+- `mdate`
+- `classification`
+- `raw_content`
 
 ## Semantic paper recommendations
 
@@ -182,6 +316,11 @@ If the goal stays "small and portable", the best immediate feature work is proba
 Top-level files and directories:
 
 - `base.py`: main PubMed ingestion script
+- `embedding.py`: PubMed ingestion plus SPECTER/FAISS recommendation workflow
+- `psyarxiv.py`: PsyArXiv wrapper around the shared OSF preprints ingestion logic
+- `socarxiv.py`: SocArXiv wrapper around the shared OSF preprints ingestion logic
+- `osf_preprints.py`: shared OSF API v2, normalization, date filtering, and SQLite helper functions
+- `openreview.py`: OpenReview venue submission ingestion script
 - `tests/test_base_smoke.py`: small smoke tests for XML parsing behavior
 - `requirements.txt`: Python package requirements for running the script without a repo-local virtualenv
 - `Dockerfile`: Linux Docker image definition for portable containerized execution
@@ -203,6 +342,8 @@ This repo no longer depends on a checked-in virtualenv. The runtime dependencies
 Current Python dependencies:
 
 - `biopython`
+- `requests`
+- `openreview-py`
 - `faiss-cpu`
 - `numpy`
 - `sentence-transformers`
@@ -211,6 +352,8 @@ System/runtime assumptions:
 
 - Python 3.12 or compatible recent Python 3
 - network access to NCBI if you are actually fetching PubMed data
+- network access to OSF if you are fetching PsyArXiv or SocArXiv data
+- network access to OpenReview if you are fetching OpenReview venue submissions
 - a writable path for the SQLite database file
 
 Optional environment variables:
@@ -248,6 +391,22 @@ For semantic recommendations:
 python embedding.py --build-index
 python embedding.py --build-from-existing-db pubmed.sqlite
 python embedding.py --interest "single-cell genomics for early cancer biomarker discovery" --limit 10
+```
+
+For OSF-hosted preprints:
+
+```bash
+python psyarxiv.py --db psyarxiv.sqlite
+python socarxiv.py --db socarxiv.sqlite
+python psyarxiv.py --db psyarxiv.sqlite --query "cognitive bias" --max-results 500
+python socarxiv.py --db socarxiv.sqlite --query "social inequality" --max-results 500
+```
+
+For OpenReview venue submissions:
+
+```bash
+python openreview.py "ICLR.cc/2026/Conference"
+python openreview.py "ICLR.cc/2026/Conference" --invitation "ICLR.cc/2026/Conference/-/Blind_Submission"
 ```
 
 The first embedding run may download the model from Hugging Face, so it needs internet access.

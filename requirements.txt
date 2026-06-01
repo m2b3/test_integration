@@ -1,4 +1,6 @@
 biopython==1.86
+requests>=2.32.0
+openreview-py
 numpy==2.4.4
 sentence-transformers>=3.0.0
 faiss-cpu
