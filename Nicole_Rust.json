@@ -1,0 +1,1256 @@
+{
+  "mode": "scientist",
+  "journal_mode": null,
+  "result_source": "scientist_account",
+  "query": "Nicole Rust",
+  "days": 1,
+  "since": "2026-06-07T03:48:04Z",
+  "fetched_at": "2026-06-08T03:48:05Z",
+  "selected_actor": {
+    "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+    "handle": "nicolecrust.bsky.social",
+    "displayName": "Nicole Rust",
+    "description": "Mood & Memory researcher with a computational bent. https://www.nicolecrust.com. Science advocate. Prof (UPenn Psych) - on leave as a Simons Pivot Fellow. Author: Elusive Cures. https://press.princeton.edu/books/hardcover/9780691243054/elusive-cures",
+    "followersCount": 0
+  },
+  "candidate_actors": [
+    {
+      "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "handle": "nicolecrust.bsky.social",
+      "displayName": "Nicole Rust",
+      "description": "Mood & Memory researcher with a computational bent. https://www.nicolecrust.com. Science advocate. Prof (UPenn Psych) - on leave as a Simons Pivot Fellow. Author: Elusive Cures. https://press.princeton.edu/books/hardcover/9780691243054/elusive-cures",
+      "followersCount": 0,
+      "score": 160.0
+    },
+    {
+      "did": "did:plc:uphkzoyqessam57n3tpc53yc",
+      "handle": "saltypeppermint.bsky.social",
+      "displayName": "Nicole Heinimann",
+      "description": "Where are my types, I can't see without my types!\n\nhttps://ipv3.org\nPhD student @tuberlin.bsky.social\nAsk me about EGraphs, Compilers, GPU-Computing, and Rust\nSIGPLAN AV Member\nOpinions are those of your pet",
+      "followersCount": 0,
+      "score": 0.0
+    },
+    {
+      "did": "did:plc:4hobdiwffmgqgxk2r5lzliwx",
+      "handle": "nicole444b.bsky.social",
+      "displayName": "Nicole",
+      "description": "HBCU Alum-Rust College💙🤍|1908🩷💚 |Certified EMDR Therapist 🧠|🖤✊🏾|Gamer 🎮|Bookaholic 📚",
+      "followersCount": 0,
+      "score": 0.0
+    }
+  ],
+  "count": 13,
+  "posts": [
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpuhgyeps2h",
+      "cid": "bafyreifdkpf57wbwlxm7s7xpegwpjwbldxh7gqx63fcunsq556dhe6dypi",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Explanation appreciated; thank you! Perhaps one day you'll write such a piece? Either way, I'm grateful for what you've written here.",
+      "created_at": "2026-06-07T19:07:26.947Z",
+      "indexed_at": "2026-06-07T19:07:27.865Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnpuhgyeps2h",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpuhgyeps2h",
+        "cid": "bafyreifdkpf57wbwlxm7s7xpegwpjwbldxh7gqx63fcunsq556dhe6dypi",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T19:07:26.947Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreihmxvnsjcz3mck4aqgkfyxrwchcnd7kbg4vrcaebe6rt5pyqyqga4",
+              "uri": "at://did:plc:fqyi5fkyvrvf4w6ws26gsphx/app.bsky.feed.post/3mnptqpa3522q"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "Explanation appreciated; thank you! Perhaps one day you'll write such a piece? Either way, I'm grateful for what you've written here."
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T19:07:27.865Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpry2igyk2y",
+      "cid": "bafyreige5lc34k4qxgmfeab3qthxvl7hoyagggkj4t4yvk6cwyjiscjei4",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Congrats! (2x).",
+      "created_at": "2026-06-07T18:23:03.041Z",
+      "indexed_at": "2026-06-07T18:23:04.363Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnpry2igyk2y",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpry2igyk2y",
+        "cid": "bafyreige5lc34k4qxgmfeab3qthxvl7hoyagggkj4t4yvk6cwyjiscjei4",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T18:23:03.041Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreiarnw6p6aqeclw76mmbrbodtiftz5enuhlrkog4fsa5trqzebugny",
+              "uri": "at://did:plc:dfywxa4352ebrely4hdrt56i/app.bsky.feed.post/3mnprvge4p22h"
+            },
+            "root": {
+              "cid": "bafyreiarnw6p6aqeclw76mmbrbodtiftz5enuhlrkog4fsa5trqzebugny",
+              "uri": "at://did:plc:dfywxa4352ebrely4hdrt56i/app.bsky.feed.post/3mnprvge4p22h"
+            }
+          },
+          "text": "Congrats! (2x)."
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T18:23:04.363Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:cz2kqdg6gks3tx4h4lnyvllv/app.bsky.feed.post/3mnp66nrqs226",
+      "cid": "bafyreiexxbavrrvby7agjloqppianghhk4io5ka4ln33khpmrlclqtx24q",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "cdelawalla.bsky.social",
+      "author_display_name": "Colette Delawalla, PhD",
+      "author_did": "did:plc:cz2kqdg6gks3tx4h4lnyvllv",
+      "text": "Hopping on a plane to DC tonight, because @standupforscience.net is fighting this new OMB rule proposal with everything we’ve got.\n\nMy calendar is literally booked for 12 hours of meetings, on the Hill, in a row for three days.\n\nWanna sponsor the trip? secure.qgiv.com/for/stop-vou...",
+      "created_at": "2026-06-07T12:28:49.757Z",
+      "indexed_at": "2026-06-07T12:28:50.362Z",
+      "like_count": 186,
+      "repost_count": 52,
+      "reply_count": 8,
+      "quote_count": 5,
+      "url": "https://bsky.app/profile/cdelawalla.bsky.social/post/3mnp66nrqs226",
+      "raw": {
+        "uri": "at://did:plc:cz2kqdg6gks3tx4h4lnyvllv/app.bsky.feed.post/3mnp66nrqs226",
+        "cid": "bafyreiexxbavrrvby7agjloqppianghhk4io5ka4ln33khpmrlclqtx24q",
+        "author": {
+          "did": "did:plc:cz2kqdg6gks3tx4h4lnyvllv",
+          "handle": "cdelawalla.bsky.social",
+          "displayName": "Colette Delawalla, PhD",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:cz2kqdg6gks3tx4h4lnyvllv/bafkreidgc5poewyux54h2frzf6crx3hngcitdtfhyqikphfi2pehjvsb2q",
+          "associated": {
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-09-27T23:47:23.219Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mmfuejn2h52b",
+                "isValid": true,
+                "createdAt": "2026-05-22T02:13:59.752Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T12:28:49.757Z",
+          "embed": {
+            "$type": "app.bsky.embed.external",
+            "external": {
+              "description": "",
+              "title": "Stop Vought from Privatizing and Politicizing Science",
+              "uri": "https://secure.qgiv.com/for/stop-vought-save-science/"
+            }
+          },
+          "facets": [
+            {
+              "$type": "app.bsky.richtext.facet",
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#mention",
+                  "did": "did:plc:x7irsqqhp64woalar7obnnft"
+                }
+              ],
+              "index": {
+                "byteEnd": 64,
+                "byteStart": 42
+              }
+            },
+            {
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#link",
+                  "uri": "https://secure.qgiv.com/for/stop-vought-save-science/"
+                }
+              ],
+              "index": {
+                "byteEnd": 286,
+                "byteStart": 255
+              }
+            }
+          ],
+          "langs": [
+            "en"
+          ],
+          "text": "Hopping on a plane to DC tonight, because @standupforscience.net is fighting this new OMB rule proposal with everything we’ve got.\n\nMy calendar is literally booked for 12 hours of meetings, on the Hill, in a row for three days.\n\nWanna sponsor the trip? secure.qgiv.com/for/stop-vou..."
+        },
+        "embed": {
+          "external": {
+            "uri": "https://secure.qgiv.com/for/stop-vought-save-science/",
+            "title": "Stop Vought from Privatizing and Politicizing Science",
+            "description": ""
+          },
+          "$type": "app.bsky.embed.external#view"
+        },
+        "bookmarkCount": 4,
+        "replyCount": 8,
+        "repostCount": 52,
+        "likeCount": 186,
+        "quoteCount": 5,
+        "indexedAt": "2026-06-07T12:28:50.362Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpmjttvfk2b",
+      "cid": "bafyreibhyzflqcuavsarrdfvqn6v7iwnbbizpzu3hy5maqoqmxorjuc5pa",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Wonderful! Thank you for it. Least we can do is support; done.",
+      "created_at": "2026-06-07T16:45:37.605Z",
+      "indexed_at": "2026-06-07T16:45:38.171Z",
+      "like_count": 3,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnpmjttvfk2b",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpmjttvfk2b",
+        "cid": "bafyreibhyzflqcuavsarrdfvqn6v7iwnbbizpzu3hy5maqoqmxorjuc5pa",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T16:45:37.605Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreiexxbavrrvby7agjloqppianghhk4io5ka4ln33khpmrlclqtx24q",
+              "uri": "at://did:plc:cz2kqdg6gks3tx4h4lnyvllv/app.bsky.feed.post/3mnp66nrqs226"
+            },
+            "root": {
+              "cid": "bafyreiexxbavrrvby7agjloqppianghhk4io5ka4ln33khpmrlclqtx24q",
+              "uri": "at://did:plc:cz2kqdg6gks3tx4h4lnyvllv/app.bsky.feed.post/3mnp66nrqs226"
+            }
+          },
+          "text": "Wonderful! Thank you for it. Least we can do is support; done."
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 3,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T16:45:38.171Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpdprm7bs2h",
+      "cid": "bafyreidzh2svscyyu4atqphcfjvmnuyxvhr5lwttjvktyytc4zyooeiyam",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Yeah ... Do you know of anyone who does it both well and succinctly? Or perhaps a succinct overview of contemporary theory followed by more elaboration?",
+      "created_at": "2026-06-07T14:07:52.907Z",
+      "indexed_at": "2026-06-07T14:07:53.868Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnpdprm7bs2h",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnpdprm7bs2h",
+        "cid": "bafyreidzh2svscyyu4atqphcfjvmnuyxvhr5lwttjvktyytc4zyooeiyam",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T14:07:52.907Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreifh5hqqq45eu26nbr5olph4c4opfz3pevnj63ryttru66kyf52ylq",
+              "uri": "at://did:plc:fqyi5fkyvrvf4w6ws26gsphx/app.bsky.feed.post/3mnpdgklloc2o"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "Yeah ... Do you know of anyone who does it both well and succinctly? Or perhaps a succinct overview of contemporary theory followed by more elaboration?"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T14:07:53.868Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7ymxyjc2r",
+      "cid": "bafyreifhasqurhyicfxdp46kj4qgfdenn7ov2vyegca44cgfd3ix5sqloi",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "The fact that even the Wikipedia article (where you tend to find succinctness if not accuracy) is a bit of a jumble does not leave me hopeful. Again: Shoutout for leads to anyone with leads. I'm not here to belittle the approach; I'm looking to do the opposite.\n\nen.wikipedia.org/wiki/Psychoa...",
+      "created_at": "2026-06-07T13:01:15.072Z",
+      "indexed_at": "2026-06-07T13:01:15.569Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnp7ymxyjc2r",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7ymxyjc2r",
+        "cid": "bafyreifhasqurhyicfxdp46kj4qgfdenn7ov2vyegca44cgfd3ix5sqloi",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T13:01:15.072Z",
+          "embed": {
+            "$type": "app.bsky.embed.external",
+            "external": {
+              "description": "",
+              "title": "Psychoanalytic theory - Wikipedia",
+              "uri": "https://en.wikipedia.org/wiki/Psychoanalytic_theory"
+            }
+          },
+          "facets": [
+            {
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#link",
+                  "uri": "https://en.wikipedia.org/wiki/Psychoanalytic_theory"
+                }
+              ],
+              "index": {
+                "byteEnd": 295,
+                "byteStart": 263
+              }
+            }
+          ],
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreihznfhbmx7o7yhkpoq7hbduysmiwg27qanlpxqcowtz5ssmgnkrta",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wl2y"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "The fact that even the Wikipedia article (where you tend to find succinctness if not accuracy) is a bit of a jumble does not leave me hopeful. Again: Shoutout for leads to anyone with leads. I'm not here to belittle the approach; I'm looking to do the opposite.\n\nen.wikipedia.org/wiki/Psychoa..."
+        },
+        "embed": {
+          "external": {
+            "uri": "https://en.wikipedia.org/wiki/Psychoanalytic_theory",
+            "title": "Psychoanalytic theory - Wikipedia",
+            "description": ""
+          },
+          "$type": "app.bsky.embed.external#view"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T13:01:15.569Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wl2y",
+      "cid": "bafyreihznfhbmx7o7yhkpoq7hbduysmiwg27qanlpxqcowtz5ssmgnkrta",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "But it also defies scripting in the same ways that many of the other behavioral therapies are amendable to (In week 1 ... In week 2 ...). \n\nUltimately, I wonder if its just it's own thing. While I haven't figured out how to succiently capture the spirit of that thing I'll keep trying/looking. /3",
+      "created_at": "2026-06-07T12:57:00.237Z",
+      "indexed_at": "2026-06-07T12:57:01.036Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 2,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnp7r277wl2y",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wl2y",
+        "cid": "bafyreihznfhbmx7o7yhkpoq7hbduysmiwg27qanlpxqcowtz5ssmgnkrta",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T12:57:00.237Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreiaqu62ftp6o6yxexi6ivmy6vo6i56wmmpm4brmrbeffonrcyschaa",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wk2y"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "But it also defies scripting in the same ways that many of the other behavioral therapies are amendable to (In week 1 ... In week 2 ...). \n\nUltimately, I wonder if its just it's own thing. While I haven't figured out how to succiently capture the spirit of that thing I'll keep trying/looking. /3"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 2,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T12:57:01.036Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wk2y",
+      "cid": "bafyreiaqu62ftp6o6yxexi6ivmy6vo6i56wmmpm4brmrbeffonrcyschaa",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "I'm trying to pinpoint the equivalents of contemporary psychodynamic psychotherapy. Some of medicine has the \"see class X do things Y\" flavor to it (where in many cases we don't know exactly why Y works just that it does) - so maybe that's some of it? /2",
+      "created_at": "2026-06-07T12:57:00.236Z",
+      "indexed_at": "2026-06-07T12:57:01.008Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnp7r277wk2y",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7r277wk2y",
+        "cid": "bafyreiaqu62ftp6o6yxexi6ivmy6vo6i56wmmpm4brmrbeffonrcyschaa",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T12:57:00.236Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreiboliomskck67ko7sk3s2yw7xjhrgk7kqnzlf6wgtm7czf5vnfzbu",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7qzwxbs2y"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "I'm trying to pinpoint the equivalents of contemporary psychodynamic psychotherapy. Some of medicine has the \"see class X do things Y\" flavor to it (where in many cases we don't know exactly why Y works just that it does) - so maybe that's some of it? /2"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T12:57:01.008Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7qzwxbs2y",
+      "cid": "bafyreiboliomskck67ko7sk3s2yw7xjhrgk7kqnzlf6wgtm7czf5vnfzbu",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Thank you! The Shedler article helps me pinpoint what I struggle with: it's a framework with a lot of moving parts that are quite disconnected (particularly when you the core theory id/ego/superego). In that, it's quite different from Cognitive Behavioral Therapy which is shaped around a core. /1",
+      "created_at": "2026-06-07T12:57:00.235Z",
+      "indexed_at": "2026-06-07T12:57:00.963Z",
+      "like_count": 2,
+      "repost_count": 0,
+      "reply_count": 2,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnp7qzwxbs2y",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnp7qzwxbs2y",
+        "cid": "bafyreiboliomskck67ko7sk3s2yw7xjhrgk7kqnzlf6wgtm7czf5vnfzbu",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T12:57:00.235Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreidn4j3xw7la26wolrxkpxmamofbz4kktbdq32a2f73vaculudhwwq",
+              "uri": "at://did:plc:6gfgbi7sfhx2m4yxq42nhyei/app.bsky.feed.post/3mnp32vdbis2d"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "Thank you! The Shedler article helps me pinpoint what I struggle with: it's a framework with a lot of moving parts that are quite disconnected (particularly when you the core theory id/ego/superego). In that, it's quite different from Cognitive Behavioral Therapy which is shaped around a core. /1"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 2,
+        "repostCount": 0,
+        "likeCount": 2,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T12:57:00.963Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoo44imnc22",
+      "cid": "bafyreibsirya5mez6kydficovn3qmxvybowi6dqhqbmntp5nze5oqjlajm",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "For those in the know, how's this? In addition to getting the facts right, does it capture the spirit of the psychodynamic approach?",
+      "created_at": "2026-06-07T07:41:04.656Z",
+      "indexed_at": "2026-06-07T07:41:07.366Z",
+      "like_count": 5,
+      "repost_count": 1,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnoo44imnc22",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoo44imnc22",
+        "cid": "bafyreibsirya5mez6kydficovn3qmxvybowi6dqhqbmntp5nze5oqjlajm",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T07:41:04.656Z",
+          "embed": {
+            "$type": "app.bsky.embed.images",
+            "images": [
+              {
+                "alt": "The theory behind psychodynamic therapy holds that our conscious thoughts reflect only a tiny fraction of what drives our behavior; most of it is driven by our unconscious mind. Our mind, in turn, is comprised of the tripartite id, which instinctively seeks pleasure and immediate gratification; the superego, our moral center that internalizes societal standards; and the ego, which mediates between what the id wants and what the superego permits. When the id and superego are in conflict, our ego resorts to unconscious defense mechanisms like denial, projection, or repression to safeguard us. However, if the ego is overwhelmed by the tension between the id and superego, it can result in psychological issues and maladaptive behaviors. \nThe therapeutic solution involves making the repressed conflict between the id and superego conscious for resolution. This often requires revealing the moral standards, rules, and expectations that the superego internalized in childhood, which have become ingrained beliefs about right and wrong, causing anxiety, guilt, and shame.\n",
+                "aspectRatio": {
+                  "height": 754,
+                  "width": 1628
+                },
+                "image": {
+                  "$type": "blob",
+                  "ref": {
+                    "$link": "bafkreibamdy7nqel4pnhpqwyqkd2rgqocp2ualkf7slszbqa43ezdlra3i"
+                  },
+                  "mimeType": "image/jpeg",
+                  "size": 666269
+                }
+              }
+            ]
+          },
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreidzodpmw2puitjcam7abfnah2so7cyol6qfecywhtiysnvh3dx5ei",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnolrrpyc22l"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "For those in the know, how's this? In addition to getting the facts right, does it capture the spirit of the psychodynamic approach?"
+        },
+        "embed": {
+          "images": [
+            {
+              "thumb": "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreibamdy7nqel4pnhpqwyqkd2rgqocp2ualkf7slszbqa43ezdlra3i",
+              "fullsize": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreibamdy7nqel4pnhpqwyqkd2rgqocp2ualkf7slszbqa43ezdlra3i",
+              "alt": "The theory behind psychodynamic therapy holds that our conscious thoughts reflect only a tiny fraction of what drives our behavior; most of it is driven by our unconscious mind. Our mind, in turn, is comprised of the tripartite id, which instinctively seeks pleasure and immediate gratification; the superego, our moral center that internalizes societal standards; and the ego, which mediates between what the id wants and what the superego permits. When the id and superego are in conflict, our ego resorts to unconscious defense mechanisms like denial, projection, or repression to safeguard us. However, if the ego is overwhelmed by the tension between the id and superego, it can result in psychological issues and maladaptive behaviors. \nThe therapeutic solution involves making the repressed conflict between the id and superego conscious for resolution. This often requires revealing the moral standards, rules, and expectations that the superego internalized in childhood, which have become ingrained beliefs about right and wrong, causing anxiety, guilt, and shame.\n",
+              "aspectRatio": {
+                "height": 754,
+                "width": 1628
+              }
+            }
+          ],
+          "$type": "app.bsky.embed.images#view"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 1,
+        "likeCount": 5,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T07:41:07.366Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnolrrpyc22l",
+      "cid": "bafyreidzodpmw2puitjcam7abfnah2so7cyol6qfecywhtiysnvh3dx5ei",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "For instance, this reference is all very factually accurate but feels like a jumble of foreign facts that fails to capture the psychodynamic spirit.\n\nwww.ncbi.nlm.nih.gov/books/NBK606...",
+      "created_at": "2026-06-07T06:59:30.336Z",
+      "indexed_at": "2026-06-07T06:59:34.663Z",
+      "like_count": 5,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnolrrpyc22l",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnolrrpyc22l",
+        "cid": "bafyreidzodpmw2puitjcam7abfnah2so7cyol6qfecywhtiysnvh3dx5ei",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T06:59:30.336Z",
+          "embed": {
+            "$type": "app.bsky.embed.external",
+            "external": {
+              "description": "Psychodynamic models propose that unconscious thoughts, desires, and memories inaccessible to conscious awareness still primarily influence human behavior; therefore, the psychodynamic model informs t...",
+              "thumb": {
+                "$type": "blob",
+                "ref": {
+                  "$link": "bafkreiaij3gwqkdnxon5c2blsevbes6qdof2nxohn6ngqmbms3o3x4csbe"
+                },
+                "mimeType": "image/jpeg",
+                "size": 416687
+              },
+              "title": "Psychodynamic Therapy",
+              "uri": "https://www.ncbi.nlm.nih.gov/books/NBK606117/"
+            }
+          },
+          "facets": [
+            {
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#link",
+                  "uri": "https://www.ncbi.nlm.nih.gov/books/NBK606117/"
+                }
+              ],
+              "index": {
+                "byteEnd": 186,
+                "byteStart": 150
+              }
+            }
+          ],
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreictrkvc22uv7w5dso4j2rlqojugx4nlkxge75uzsh6ntp3zi5ymaa",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnol7dpw6k2f"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "For instance, this reference is all very factually accurate but feels like a jumble of foreign facts that fails to capture the psychodynamic spirit.\n\nwww.ncbi.nlm.nih.gov/books/NBK606..."
+        },
+        "embed": {
+          "external": {
+            "uri": "https://www.ncbi.nlm.nih.gov/books/NBK606117/",
+            "title": "Psychodynamic Therapy",
+            "description": "Psychodynamic models propose that unconscious thoughts, desires, and memories inaccessible to conscious awareness still primarily influence human behavior; therefore, the psychodynamic model informs t...",
+            "thumb": "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreiaij3gwqkdnxon5c2blsevbes6qdof2nxohn6ngqmbms3o3x4csbe"
+          },
+          "$type": "app.bsky.embed.external#view"
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 5,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T06:59:34.663Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnol7dpw6k2f",
+      "cid": "bafyreictrkvc22uv7w5dso4j2rlqojugx4nlkxge75uzsh6ntp3zi5ymaa",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "Give me dynamical systems, attractor basins, multi-level causality, latent variables, how machines learn, subjective awareness, agency ... I'm good.\n\nHowever, my ego struggles with Ego.",
+      "created_at": "2026-06-07T06:49:11.674Z",
+      "indexed_at": "2026-06-07T06:49:12.166Z",
+      "like_count": 5,
+      "repost_count": 0,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnol7dpw6k2f",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnol7dpw6k2f",
+        "cid": "bafyreictrkvc22uv7w5dso4j2rlqojugx4nlkxge75uzsh6ntp3zi5ymaa",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T06:49:11.674Z",
+          "langs": [
+            "en"
+          ],
+          "reply": {
+            "parent": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            },
+            "root": {
+              "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+              "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t"
+            }
+          },
+          "text": "Give me dynamical systems, attractor basins, multi-level causality, latent variables, how machines learn, subjective awareness, agency ... I'm good.\n\nHowever, my ego struggles with Ego."
+        },
+        "bookmarkCount": 0,
+        "replyCount": 1,
+        "repostCount": 0,
+        "likeCount": 5,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T06:49:12.166Z",
+        "labels": []
+      }
+    },
+    {
+      "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t",
+      "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+      "mode": "scientist",
+      "result_source": "scientist_account",
+      "source_query": "Nicole Rust",
+      "selected_actor_handle": "nicolecrust.bsky.social",
+      "selected_actor_display_name": "Nicole Rust",
+      "selected_actor_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "author_handle": "nicolecrust.bsky.social",
+      "author_display_name": "Nicole Rust",
+      "author_did": "did:plc:batgjai2f2zxgvjr7niiapem",
+      "text": "I enjoy the challenge of taking complex concepts and explaining them in ways that do them justice but nearly everyone can understand.\n\nOne that trips me up: psychodynamic theory. It's hard to capture Ego, ID, Superego.\n\nHave you ever seen it done succinctly and well?\n\narchive.org/details/long...",
+      "created_at": "2026-06-07T06:42:17.555Z",
+      "indexed_at": "2026-06-07T06:42:21.362Z",
+      "like_count": 17,
+      "repost_count": 5,
+      "reply_count": 1,
+      "quote_count": 0,
+      "url": "https://bsky.app/profile/nicolecrust.bsky.social/post/3mnoksys6xc2t",
+      "raw": {
+        "uri": "at://did:plc:batgjai2f2zxgvjr7niiapem/app.bsky.feed.post/3mnoksys6xc2t",
+        "cid": "bafyreihvayrdthj7gqjy2ja4ayf564c7pfxeannxsbr6ydr6ukbcbjftpq",
+        "author": {
+          "did": "did:plc:batgjai2f2zxgvjr7niiapem",
+          "handle": "nicolecrust.bsky.social",
+          "displayName": "Nicole Rust",
+          "avatar": "https://cdn.bsky.app/img/avatar/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreihl5ksgw2anj6gm67a4lasnibc54ibyldzau4elowdckrkywmkiti",
+          "associated": {
+            "chat": {
+              "allowIncoming": "all"
+            },
+            "activitySubscription": {
+              "allowSubscriptions": "followers"
+            }
+          },
+          "labels": [],
+          "createdAt": "2023-05-29T17:47:24.764Z",
+          "verification": {
+            "verifications": [
+              {
+                "issuer": "did:plc:z72i7hdynmk6r22z27h6tvur",
+                "issuerDisplayName": "Bluesky",
+                "issuerHandle": "bsky.app",
+                "uri": "at://did:plc:z72i7hdynmk6r22z27h6tvur/app.bsky.graph.verification/3mhqi5rvdd32g",
+                "isValid": true,
+                "createdAt": "2026-03-23T16:28:47.606Z"
+              }
+            ],
+            "verifiedStatus": "valid",
+            "trustedVerifierStatus": "none"
+          }
+        },
+        "record": {
+          "$type": "app.bsky.feed.post",
+          "createdAt": "2026-06-07T06:42:17.555Z",
+          "embed": {
+            "$type": "app.bsky.embed.images",
+            "images": [
+              {
+                "alt": "circle with ego, superego and id parsed by conscious and unconscious",
+                "aspectRatio": {
+                  "height": 616,
+                  "width": 936
+                },
+                "image": {
+                  "$type": "blob",
+                  "ref": {
+                    "$link": "bafkreierz7fx2gnofvtw5fsdbgv3jqqproka5lbaj5urw6gprribrelyci"
+                  },
+                  "mimeType": "image/jpeg",
+                  "size": 272518
+                }
+              }
+            ]
+          },
+          "facets": [
+            {
+              "features": [
+                {
+                  "$type": "app.bsky.richtext.facet#link",
+                  "uri": "https://archive.org/details/longtermpsychody0000gabb/page/4/mode/2up"
+                }
+              ],
+              "index": {
+                "byteEnd": 296,
+                "byteStart": 269
+              }
+            }
+          ],
+          "langs": [
+            "en"
+          ],
+          "text": "I enjoy the challenge of taking complex concepts and explaining them in ways that do them justice but nearly everyone can understand.\n\nOne that trips me up: psychodynamic theory. It's hard to capture Ego, ID, Superego.\n\nHave you ever seen it done succinctly and well?\n\narchive.org/details/long..."
+        },
+        "embed": {
+          "images": [
+            {
+              "thumb": "https://cdn.bsky.app/img/feed_thumbnail/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreierz7fx2gnofvtw5fsdbgv3jqqproka5lbaj5urw6gprribrelyci",
+              "fullsize": "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:batgjai2f2zxgvjr7niiapem/bafkreierz7fx2gnofvtw5fsdbgv3jqqproka5lbaj5urw6gprribrelyci",
+              "alt": "circle with ego, superego and id parsed by conscious and unconscious",
+              "aspectRatio": {
+                "height": 616,
+                "width": 936
+              }
+            }
+          ],
+          "$type": "app.bsky.embed.images#view"
+        },
+        "bookmarkCount": 3,
+        "replyCount": 1,
+        "repostCount": 5,
+        "likeCount": 17,
+        "quoteCount": 0,
+        "indexedAt": "2026-06-07T06:42:21.362Z",
+        "labels": []
+      }
+    }
+  ]
+}
