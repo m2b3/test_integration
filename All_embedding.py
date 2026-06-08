@@ -1,8 +1,8 @@
 """
-Build and search a persistent FAISS index of PubMed papers updated in the past 24 hours.
+Build and search a persistent FAISS index of literature metadata.
 Stage 1:
   python All_embedding.py --build-index
-  python All_embedding.py --build-from-existing-db pubmed.sqlite
+  python All_embedding.py --build-from-existing-db medrxiv.sqlite
 
 Stage 2:
   python All_embedding.py --interest "your interest query"
@@ -1134,7 +1134,7 @@ def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build and search a persistent SPECTER FAISS index for PubMed past-24h papers."
+        description="Build and search a persistent SPECTER FAISS index for supported literature SQLite databases."
     )
     parser.add_argument("--build-index", action="store_true", help="Build the PubMed past-24h SPECTER FAISS index")
     parser.add_argument(
@@ -1189,9 +1189,9 @@ def main() -> int:
     try:
         if not args.build_index and not args.build_from_existing_db and not args.interest:
             print(
-                "Choose a mode: run `python embedding.py --build-index`, "
-                "`python embedding.py --build-from-existing-db pubmed.sqlite`, "
-                "or `python embedding.py --interest \"...\"`."
+                "Choose a mode: run `python All_embedding.py --build-index`, "
+                "`python All_embedding.py --build-from-existing-db medrxiv.sqlite`, "
+                "or `python All_embedding.py --interest \"...\"`."
             )
             return 1
 
