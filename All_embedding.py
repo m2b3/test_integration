@@ -1,10 +1,11 @@
 """
 Build and search a persistent FAISS index of PubMed papers updated in the past 24 hours.
 Stage 1:
-  python embedding.py --build-index
+  python All_embedding.py --build-index
+  python All_embedding.py --build-from-existing-db pubmed.sqlite
 
 Stage 2:
-  python embedding.py --interest "single-cell genomics for early cancer biomarker discovery"
+  python All_embedding.py --interest "your interest query"
 """
 from __future__ import annotations
 import argparse
@@ -68,10 +69,87 @@ BIORXIV_ARTICLE_COLUMNS = [
     "fetched_at",
     "raw_json",
 ]
+MEDRXIV_ARTICLE_COLUMNS = [
+    "doi",
+    "title",
+    "journal",
+    "pub_date",
+    "updated_date",
+    "authors",
+    "abstract",
+    "category",
+    "url",
+    "pdf_url",
+    "version",
+    "type",
+    "license",
+    "server",
+    "fetched_at",
+    "raw_json",
+]
+RSS_ARTICLE_COLUMNS = [
+    "rss_id",
+    "source",
+    "title",
+    "journal",
+    "pub_date",
+    "updated_date",
+    "doi",
+    "authors",
+    "abstract",
+    "categories",
+    "primary_category",
+    "url",
+    "pdf_url",
+    "feed_url",
+    "fetched_at",
+    "raw_json",
+]
+UNIFIED_PAPER_COLUMNS = [
+    "source",
+    "external_id",
+    "title",
+    "abstract",
+    "authors",
+    "published_date",
+    "updated_date",
+    "doi",
+    "journal",
+    "categories",
+    "url",
+    "pdf_url",
+    "fetched_at",
+    "raw_json",
+]
+OPENREVIEW_PAPER_COLUMNS = [
+    "id",
+    "source",
+    "forum",
+    "number",
+    "title",
+    "authors",
+    "abstract",
+    "pdf_url",
+    "venue_id",
+    "venue",
+    "venueid",
+    "decision",
+    "status",
+    "presentation",
+    "readers",
+    "cdate",
+    "mdate",
+    "classification",
+    "raw_content",
+]
 EXISTING_DB_TABLES = {
     "pubmed": ("pubmed_articles", "pmid", PUBMED_ARTICLE_COLUMNS),
     "arxiv": ("arxiv_articles", "arxiv_id", ARXIV_ARTICLE_COLUMNS),
     "biorxiv": ("biorxiv_articles", "doi", BIORXIV_ARTICLE_COLUMNS),
+    "medrxiv": ("medrxiv_articles", "doi", MEDRXIV_ARTICLE_COLUMNS),
+    "rss": ("rss_articles", "rss_id", RSS_ARTICLE_COLUMNS),
+    "papers": ("papers", "source, external_id", UNIFIED_PAPER_COLUMNS),
+    "openreview": ("papers", "id", OPENREVIEW_PAPER_COLUMNS),
 }
 
 
@@ -295,16 +373,32 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return row is not None
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
 def _detect_existing_db_source_type(conn: sqlite3.Connection, db_path: str) -> str:
     if _table_exists(conn, "pubmed_articles"):
         return "pubmed"
     if _table_exists(conn, "arxiv_articles"):
         return "arxiv"
+    if _table_exists(conn, "medrxiv_articles"):
+        return "medrxiv"
     if _table_exists(conn, "biorxiv_articles"):
         return "biorxiv"
+    if _table_exists(conn, "rss_articles"):
+        return "rss"
+    if _table_exists(conn, "papers"):
+        columns = _table_columns(conn, "papers")
+        if {"source", "external_id", "published_date"}.issubset(columns):
+            return "papers"
+        if {"id", "forum", "classification", "raw_content"}.issubset(columns):
+            return "openreview"
+        return "papers"
     raise RuntimeError(
         "SQLite database has none of the supported tables "
-        "(pubmed_articles, arxiv_articles, biorxiv_articles): "
+        "(pubmed_articles, arxiv_articles, biorxiv_articles, medrxiv_articles, rss_articles, papers): "
         f"{db_path}"
     )
 
@@ -458,6 +552,151 @@ def articles_to_index_records_biorxiv(articles: list[dict[str, Any]]) -> list[di
                 "server": server,
                 "url": article.get("url") or "",
                 "pdf_url": article.get("pdf_url") or "",
+            }
+        )
+    return records
+
+
+def articles_to_index_records_medrxiv(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for article in articles:
+        doi = str(article.get("doi") or "").strip()
+        title = str(article.get("title") or "").strip()
+        abstract = str(article.get("abstract") or "").strip()
+        if not doi or not abstract:
+            continue
+
+        row_id = len(records)
+        records.append(
+            {
+                "row_id": row_id,
+                "source": "medrxiv",
+                "external_id": doi,
+                "doi": doi,
+                "title": title,
+                "abstract": abstract,
+                "journal": article.get("journal") or "medRxiv",
+                "pub_date": article.get("pub_date") or "",
+                "updated_date": article.get("updated_date") or "",
+                "version": article.get("version") or "",
+                "type": article.get("type") or "",
+                "license": article.get("license") or "",
+                "authors": _parse_authors(article.get("authors")),
+                "category": article.get("category") or "",
+                "server": article.get("server") or "medrxiv",
+                "url": article.get("url") or "",
+                "pdf_url": article.get("pdf_url") or "",
+            }
+        )
+    return records
+
+
+def articles_to_index_records_rss(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for article in articles:
+        rss_id = str(article.get("rss_id") or "").strip()
+        source = str(article.get("source") or "").strip() or "rss"
+        title = str(article.get("title") or "").strip()
+        abstract = str(article.get("abstract") or "").strip()
+        if not rss_id or not abstract or not (title or abstract):
+            continue
+
+        row_id = len(records)
+        records.append(
+            {
+                "row_id": row_id,
+                "source": source,
+                "rss_id": rss_id,
+                "external_id": rss_id,
+                "title": title,
+                "abstract": abstract,
+                "journal": article.get("journal") or "",
+                "pub_date": article.get("pub_date") or "",
+                "updated_date": article.get("updated_date") or "",
+                "doi": article.get("doi") or "",
+                "authors": _parse_authors(article.get("authors")),
+                "categories": _parse_json_list(article.get("categories")),
+                "primary_category": article.get("primary_category") or "",
+                "url": article.get("url") or "",
+                "pdf_url": article.get("pdf_url") or "",
+                "feed_url": article.get("feed_url") or "",
+            }
+        )
+    return records
+
+
+def articles_to_index_records_papers(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for article in articles:
+        source = str(article.get("source") or "").strip()
+        external_id = str(article.get("external_id") or "").strip()
+        title = str(article.get("title") or "").strip()
+        abstract = str(article.get("abstract") or "").strip()
+        if not source or not external_id or not abstract or not (title or abstract):
+            continue
+
+        row_id = len(records)
+        records.append(
+            {
+                "row_id": row_id,
+                "source": source,
+                "external_id": external_id,
+                "title": title,
+                "abstract": abstract,
+                "journal": article.get("journal") or "",
+                "pub_date": article.get("published_date") or "",
+                "published_date": article.get("published_date") or "",
+                "updated_date": article.get("updated_date") or "",
+                "doi": article.get("doi") or "",
+                "authors": _parse_authors(article.get("authors")),
+                "categories": _parse_json_list(article.get("categories")),
+                "url": article.get("url") or "",
+                "pdf_url": article.get("pdf_url") or "",
+            }
+        )
+    return records
+
+
+def articles_to_index_records_openreview(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for article in articles:
+        openreview_id = str(article.get("id") or "").strip()
+        source = str(article.get("source") or "").strip() or "openreview"
+        title = str(article.get("title") or "").strip()
+        abstract = str(article.get("abstract") or "").strip()
+        if not openreview_id or not abstract or not (title or abstract):
+            continue
+
+        forum = str(article.get("forum") or "").strip()
+        venue = str(article.get("venue") or "").strip()
+        venue_id = str(article.get("venue_id") or "").strip()
+        journal = venue or venue_id
+
+        row_id = len(records)
+        records.append(
+            {
+                "row_id": row_id,
+                "source": source,
+                "external_id": openreview_id,
+                "openreview_id": openreview_id,
+                "forum": forum,
+                "number": article.get("number") or "",
+                "title": title,
+                "abstract": abstract,
+                "journal": journal,
+                "pub_date": article.get("cdate") or "",
+                "updated_date": article.get("mdate") or "",
+                "authors": _parse_authors(article.get("authors")),
+                "url": f"https://openreview.net/forum?id={forum or openreview_id}",
+                "pdf_url": article.get("pdf_url") or "",
+                "venue_id": venue_id,
+                "venue": venue,
+                "venueid": article.get("venueid") or "",
+                "decision": article.get("decision") or "",
+                "status": article.get("status") or "",
+                "presentation": article.get("presentation") or "",
+                "classification": article.get("classification") or "",
+                "readers": _parse_json_list(article.get("readers")),
             }
         )
     return records
@@ -645,8 +884,16 @@ def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str,
         index_records = articles_to_index_records(articles)
     elif db_source_type == "arxiv":
         index_records = articles_to_index_records_arxiv(articles)
-    else:
+    elif db_source_type == "biorxiv":
         index_records = articles_to_index_records_biorxiv(articles)
+    elif db_source_type == "medrxiv":
+        index_records = articles_to_index_records_medrxiv(articles)
+    elif db_source_type == "rss":
+        index_records = articles_to_index_records_rss(articles)
+    elif db_source_type == "openreview":
+        index_records = articles_to_index_records_openreview(articles)
+    else:
+        index_records = articles_to_index_records_papers(articles)
     skipped_count = len(articles) - len(index_records)
     if not index_records:
         raise RuntimeError("No eligible papers with abstracts were available for indexing.")
@@ -802,12 +1049,21 @@ def print_search_results(results: list[dict[str, Any]]) -> None:
 
     for rank, item in enumerate(results, start=1):
         doi = str(item.get("doi") or "").strip()
+        source = str(item.get("source") or "").strip()
+        external_id = str(item.get("external_id") or item.get("pmid") or item.get("arxiv_id") or doi or "").strip()
+        id_label = "External ID"
+        if source == "pubmed":
+            id_label = "PMID"
+        elif source == "arxiv":
+            id_label = "arXiv ID"
+        elif source in {"biorxiv", "medrxiv"}:
+            id_label = "DOI"
         print(f"#{rank} | score={float(item.get('score', 0.0)):.4f}")
         print(f"Title: {item.get('title') or 'N/A'}")
-        print(f"PMID: {item.get('pmid') or 'N/A'}")
+        print(f"{id_label}: {external_id or 'N/A'}")
         print(f"Journal: {item.get('journal') or 'N/A'}")
         print(f"Date: {item.get('pub_date') or 'N/A'}")
-        if doi:
+        if doi and id_label != "DOI":
             print(f"DOI: {doi}")
         print(f"Authors: {_format_authors(item.get('authors'))}")
         print(f"URL: {item.get('url') or 'N/A'}")
@@ -887,7 +1143,8 @@ def _parse_args() -> argparse.Namespace:
         default="",
         help=(
             "Build the SPECTER FAISS index from an existing pubmed_articles, "
-            "arxiv_articles, or biorxiv_articles SQLite database"
+            "arxiv_articles, biorxiv_articles, medrxiv_articles, rss_articles, "
+            "or unified papers SQLite database"
         ),
     )
     parser.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
