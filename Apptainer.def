@@ -4,7 +4,10 @@ From: python:3.12-slim
 %files
     requirements.txt /opt/infogather/requirements.txt
     base.py /opt/infogather/base.py
-    embedding.py /opt/infogather/embedding.py
+    arxiv.py /opt/infogather/arxiv.py
+    biorxiv.py /opt/infogather/biorxiv.py
+    medrxiv.py /opt/infogather/medrxiv.py
+    All_embedding.py /opt/infogather/All_embedding.py
 
 %post
     set -eu
@@ -16,4 +19,4 @@ From: python:3.12-slim
 
 %runscript
     cd "$PWD"
-    exec python /opt/infogather/embedding.py "$@"
+    exec python /opt/infogather/All_embedding.py "$@"
