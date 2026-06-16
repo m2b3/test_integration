@@ -8,9 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY base.py embedding.py ./
+COPY base.py arxiv.py biorxiv.py medrxiv.py All_embedding.py ./
 
-# embedding.py writes SQLite, FAISS, metadata, and manifest artifacts to the
+# All_embedding.py writes SQLite, FAISS, metadata, and manifest artifacts to the
 # paths passed via CLI options. Mount a writable host directory at runtime if
 # you want those artifacts and an optional .env file to persist.
-ENTRYPOINT ["python", "/app/embedding.py"]
+ENTRYPOINT ["python", "/app/All_embedding.py"]
