@@ -1,4 +1,6 @@
-biopython>=1.86,<2
-faiss-cpu>=1.8.0
-numpy>=1.26,<3
+biopython==1.86
+requests>=2.32.0
+openreview-py
+numpy==2.4.4
 sentence-transformers>=3.0.0
+faiss-cpu

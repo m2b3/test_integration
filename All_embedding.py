@@ -1,11 +1,10 @@
 """
-Build and search a persistent FAISS index of literature metadata.
+Build and search a persistent FAISS index of PubMed papers updated in the past 24 hours.
 Stage 1:
-  python All_embedding.py --build-index
-  python All_embedding.py --build-from-existing-db medrxiv.sqlite
+  python embedding.py --build-index
 
 Stage 2:
-  python All_embedding.py --interest "your interest query"
+  python embedding.py --interest "single-cell genomics for early cancer biomarker discovery"
 """
 from __future__ import annotations
 import argparse
@@ -69,24 +68,6 @@ BIORXIV_ARTICLE_COLUMNS = [
     "fetched_at",
     "raw_json",
 ]
-MEDRXIV_ARTICLE_COLUMNS = [
-    "doi",
-    "title",
-    "journal",
-    "pub_date",
-    "updated_date",
-    "authors",
-    "abstract",
-    "category",
-    "url",
-    "pdf_url",
-    "version",
-    "type",
-    "license",
-    "server",
-    "fetched_at",
-    "raw_json",
-]
 RSS_ARTICLE_COLUMNS = [
     "rss_id",
     "source",
@@ -146,7 +127,6 @@ EXISTING_DB_TABLES = {
     "pubmed": ("pubmed_articles", "pmid", PUBMED_ARTICLE_COLUMNS),
     "arxiv": ("arxiv_articles", "arxiv_id", ARXIV_ARTICLE_COLUMNS),
     "biorxiv": ("biorxiv_articles", "doi", BIORXIV_ARTICLE_COLUMNS),
-    "medrxiv": ("medrxiv_articles", "doi", MEDRXIV_ARTICLE_COLUMNS),
     "rss": ("rss_articles", "rss_id", RSS_ARTICLE_COLUMNS),
     "papers": ("papers", "source, external_id", UNIFIED_PAPER_COLUMNS),
     "openreview": ("papers", "id", OPENREVIEW_PAPER_COLUMNS),
@@ -383,8 +363,6 @@ def _detect_existing_db_source_type(conn: sqlite3.Connection, db_path: str) -> s
         return "pubmed"
     if _table_exists(conn, "arxiv_articles"):
         return "arxiv"
-    if _table_exists(conn, "medrxiv_articles"):
-        return "medrxiv"
     if _table_exists(conn, "biorxiv_articles"):
         return "biorxiv"
     if _table_exists(conn, "rss_articles"):
@@ -398,7 +376,7 @@ def _detect_existing_db_source_type(conn: sqlite3.Connection, db_path: str) -> s
         return "papers"
     raise RuntimeError(
         "SQLite database has none of the supported tables "
-        "(pubmed_articles, arxiv_articles, biorxiv_articles, medrxiv_articles, rss_articles, papers): "
+        "(pubmed_articles, arxiv_articles, biorxiv_articles, rss_articles, papers): "
         f"{db_path}"
     )
 
@@ -550,40 +528,6 @@ def articles_to_index_records_biorxiv(articles: list[dict[str, Any]]) -> list[di
                 "authors": _parse_authors(article.get("authors")),
                 "category": article.get("category") or "",
                 "server": server,
-                "url": article.get("url") or "",
-                "pdf_url": article.get("pdf_url") or "",
-            }
-        )
-    return records
-
-
-def articles_to_index_records_medrxiv(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    for article in articles:
-        doi = str(article.get("doi") or "").strip()
-        title = str(article.get("title") or "").strip()
-        abstract = str(article.get("abstract") or "").strip()
-        if not doi or not abstract:
-            continue
-
-        row_id = len(records)
-        records.append(
-            {
-                "row_id": row_id,
-                "source": "medrxiv",
-                "external_id": doi,
-                "doi": doi,
-                "title": title,
-                "abstract": abstract,
-                "journal": article.get("journal") or "medRxiv",
-                "pub_date": article.get("pub_date") or "",
-                "updated_date": article.get("updated_date") or "",
-                "version": article.get("version") or "",
-                "type": article.get("type") or "",
-                "license": article.get("license") or "",
-                "authors": _parse_authors(article.get("authors")),
-                "category": article.get("category") or "",
-                "server": article.get("server") or "medrxiv",
                 "url": article.get("url") or "",
                 "pdf_url": article.get("pdf_url") or "",
             }
@@ -886,8 +830,6 @@ def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str,
         index_records = articles_to_index_records_arxiv(articles)
     elif db_source_type == "biorxiv":
         index_records = articles_to_index_records_biorxiv(articles)
-    elif db_source_type == "medrxiv":
-        index_records = articles_to_index_records_medrxiv(articles)
     elif db_source_type == "rss":
         index_records = articles_to_index_records_rss(articles)
     elif db_source_type == "openreview":
@@ -1049,21 +991,12 @@ def print_search_results(results: list[dict[str, Any]]) -> None:
 
     for rank, item in enumerate(results, start=1):
         doi = str(item.get("doi") or "").strip()
-        source = str(item.get("source") or "").strip()
-        external_id = str(item.get("external_id") or item.get("pmid") or item.get("arxiv_id") or doi or "").strip()
-        id_label = "External ID"
-        if source == "pubmed":
-            id_label = "PMID"
-        elif source == "arxiv":
-            id_label = "arXiv ID"
-        elif source in {"biorxiv", "medrxiv"}:
-            id_label = "DOI"
         print(f"#{rank} | score={float(item.get('score', 0.0)):.4f}")
         print(f"Title: {item.get('title') or 'N/A'}")
-        print(f"{id_label}: {external_id or 'N/A'}")
+        print(f"PMID: {item.get('pmid') or 'N/A'}")
         print(f"Journal: {item.get('journal') or 'N/A'}")
         print(f"Date: {item.get('pub_date') or 'N/A'}")
-        if doi and id_label != "DOI":
+        if doi:
             print(f"DOI: {doi}")
         print(f"Authors: {_format_authors(item.get('authors'))}")
         print(f"URL: {item.get('url') or 'N/A'}")
@@ -1134,7 +1067,7 @@ def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build and search a persistent SPECTER FAISS index for supported literature SQLite databases."
+        description="Build and search a persistent SPECTER FAISS index for PubMed past-24h papers."
     )
     parser.add_argument("--build-index", action="store_true", help="Build the PubMed past-24h SPECTER FAISS index")
     parser.add_argument(
@@ -1143,8 +1076,7 @@ def _parse_args() -> argparse.Namespace:
         default="",
         help=(
             "Build the SPECTER FAISS index from an existing pubmed_articles, "
-            "arxiv_articles, biorxiv_articles, medrxiv_articles, rss_articles, "
-            "or unified papers SQLite database"
+            "arxiv_articles, biorxiv_articles, rss_articles, or unified papers SQLite database"
         ),
     )
     parser.add_argument("--db", default=DEFAULT_DB_PATH, help=f"SQLite database path (default: {DEFAULT_DB_PATH})")
@@ -1189,9 +1121,9 @@ def main() -> int:
     try:
         if not args.build_index and not args.build_from_existing_db and not args.interest:
             print(
-                "Choose a mode: run `python All_embedding.py --build-index`, "
-                "`python All_embedding.py --build-from-existing-db medrxiv.sqlite`, "
-                "or `python All_embedding.py --interest \"...\"`."
+                "Choose a mode: run `python embedding.py --build-index`, "
+                "`python embedding.py --build-from-existing-db pubmed.sqlite`, "
+                "or `python embedding.py --interest \"...\"`."
             )
             return 1
 
