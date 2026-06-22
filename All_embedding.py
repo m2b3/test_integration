@@ -1769,6 +1769,7 @@ def print_search_results(results: list[dict[str, Any]]) -> None:
     for rank, item in enumerate(results, start=1):
         doi = str(item.get("doi") or "").strip()
         print(f"#{rank} | score={float(item.get('score', 0.0)):.4f}")
+        print(f"Source: {item.get('source') or 'N/A'}")
         print(f"Title: {item.get('title') or 'N/A'}")
         print(f"PMID: {item.get('pmid') or 'N/A'}")
         print(f"Journal: {item.get('journal') or 'N/A'}")
