@@ -1,20 +1,35 @@
 """
-Build and search persistent SPECTER FAISS indexes for scientific SQLite databases.
+Build persistent semantic and keyword indexes for scientific SQLite databases,
+then search them using semantic, keyword, or hybrid retrieval.
+
 Stage 1:
+  Build a single-source SPECTER FAISS index and SQLite FTS5 keyword index:
   python All_embedding.py arxiv.sqlite
+
+  Merge supported databases and build combined FAISS and FTS5 indexes:
   python All_embedding.py all.sqlite
 
 Stage 2:
-  python All_embedding.py --interest "single-cell genomics for early cancer biomarker discovery" --all --limit 10
-  python All_embedding.py --interest "eye-tracking" --arxiv --limit 10
+  Semantic search (the default):
+  python All_embedding.py --interest "MCTS" --all --limit 10
+
+  Keyword search:
+  python All_embedding.py --interest "MCTS" --all --search-mode keyword --limit 10
+
+  Hybrid search using keyword/semantic candidate union and RRF:
+  python All_embedding.py --interest "MCTS" --all --search-mode hybrid --pool-size 100 --limit 10
+
+Use --all for the combined artifacts or --arxiv for the arXiv-only artifacts.
 """
 from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -36,6 +51,7 @@ SEARCH_ARTIFACT_TARGETS = (
     "openreview",
     "rss",
 )
+STAGE2_SOURCE_TARGETS = ("all", "arxiv")
 PUBMED_HISTORY_FETCH_LIMIT = 9999
 PUBMED_MAX_UID = 999_999_999
 PUBMED_ARTICLE_COLUMNS = [
@@ -203,6 +219,15 @@ EXISTING_DB_TABLES = {
     "papers": ("papers", "source, external_id", UNIFIED_PAPER_COLUMNS),
     "openreview": ("papers", "id", OPENREVIEW_PAPER_COLUMNS),
 }
+
+
+@dataclass(frozen=True)
+class SearchArtifacts:
+    source: str
+    sqlite_path: str
+    index_path: str
+    metadata_path: str
+    manifest_path: str
 
 
 def format_seconds(seconds: float) -> str:
@@ -809,6 +834,7 @@ def articles_to_index_records(articles: list[dict[str, Any]]) -> list[dict[str, 
             {
                 "row_id": row_id,
                 "source": "pubmed",
+                "paper_key": f"pubmed:{pmid}",
                 "pmid": pmid,
                 "external_id": pmid,
                 "title": title,
@@ -837,6 +863,7 @@ def articles_to_index_records_arxiv(articles: list[dict[str, Any]]) -> list[dict
             {
                 "row_id": row_id,
                 "source": "arxiv",
+                "paper_key": f"arxiv:{arxiv_id}",
                 "external_id": arxiv_id,
                 "arxiv_id": arxiv_id,
                 "title": title,
@@ -875,6 +902,7 @@ def articles_to_index_records_biorxiv(articles: list[dict[str, Any]]) -> list[di
             {
                 "row_id": row_id,
                 "source": source,
+                "paper_key": f"{source}:{doi}",
                 "external_id": doi,
                 "doi": doi,
                 "title": title,
@@ -908,6 +936,7 @@ def articles_to_index_records_rss(articles: list[dict[str, Any]]) -> list[dict[s
             {
                 "row_id": row_id,
                 "source": source,
+                "paper_key": f"{source}:{rss_id}",
                 "rss_id": rss_id,
                 "external_id": rss_id,
                 "title": title,
@@ -942,6 +971,7 @@ def articles_to_index_records_papers(articles: list[dict[str, Any]]) -> list[dic
             {
                 "row_id": row_id,
                 "source": source,
+                "paper_key": f"{source}:{external_id}",
                 "external_id": external_id,
                 "title": title,
                 "abstract": abstract,
@@ -979,6 +1009,7 @@ def articles_to_index_records_openreview(articles: list[dict[str, Any]]) -> list
             {
                 "row_id": row_id,
                 "source": source,
+                "paper_key": f"{source}:{openreview_id}",
                 "external_id": openreview_id,
                 "openreview_id": openreview_id,
                 "forum": forum,
@@ -1034,9 +1065,77 @@ def unified_records_to_index_records(records: list[dict[str, Any]]) -> list[dict
         metadata_record["abstract"] = abstract
         metadata_record["source"] = source
         metadata_record["external_id"] = external_id
+        metadata_record["paper_key"] = f"{source}:{external_id}"
         metadata_record["pub_date"] = metadata_record.get("published_date")
         index_records.append(metadata_record)
     return index_records
+
+
+def create_or_replace_fts_index(db_path: str, index_records: list[dict[str, Any]]) -> int:
+    if not db_path:
+        raise ValueError("A SQLite database path is required to build the keyword index.")
+
+    rows: list[tuple[str, str, str, str, str]] = []
+    seen_keys: set[str] = set()
+    for record in index_records:
+        source = str(record.get("source") or "").strip()
+        external_id = str(record.get("external_id") or "").strip()
+        paper_key = str(record.get("paper_key") or "").strip() or (
+            f"{source}:{external_id}" if source and external_id else ""
+        )
+        if not paper_key:
+            raise RuntimeError("Cannot build papers_fts: an index record is missing paper_key.")
+        if paper_key in seen_keys:
+            raise RuntimeError(f"Cannot build papers_fts: duplicate paper_key `{paper_key}`.")
+        seen_keys.add(paper_key)
+        rows.append(
+            (
+                paper_key,
+                source,
+                external_id,
+                str(record.get("title") or ""),
+                str(record.get("abstract") or ""),
+            )
+        )
+
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            with conn:
+                conn.execute("DROP TABLE IF EXISTS papers_fts")
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE papers_fts USING fts5(
+                        paper_key UNINDEXED,
+                        source UNINDEXED,
+                        external_id UNINDEXED,
+                        title,
+                        abstract,
+                        tokenize='unicode61 remove_diacritics 2'
+                    )
+                    """
+                )
+                conn.executemany(
+                    """
+                    INSERT INTO papers_fts(
+                        paper_key, source, external_id, title, abstract
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        if "fts5" in str(exc).lower() or "no such module" in str(exc).lower():
+            raise RuntimeError(
+                "Keyword and hybrid search require a Python SQLite build with FTS5 support."
+            ) from exc
+        raise RuntimeError(f"Could not create papers_fts in `{db_path}`: {exc}") from exc
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Could not create papers_fts in `{db_path}`: {exc}") from exc
+
+    print(f"[info] Rebuilt papers_fts in {db_path} with {len(rows)} rows")
+    return len(rows)
 
 
 def _populated_field_count(record: dict[str, Any]) -> int:
@@ -1366,6 +1465,7 @@ def build_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     skipped_count = len(articles) - len(index_records)
     if not index_records:
         raise RuntimeError("No eligible papers with abstracts were available for indexing.")
+    fts_row_count = create_or_replace_fts_index(args.db, index_records)
 
     texts = [build_paper_text(record["title"], record["abstract"]) for record in index_records]
 
@@ -1395,6 +1495,9 @@ def build_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "num_fetched_pmids": len(pmids),
         "num_loaded_articles": len(articles),
         "num_skipped_papers": skipped_count,
+        "fts5_db_path": args.db,
+        "fts5_table": "papers_fts",
+        "fts5_row_count": fts_row_count,
         "built_at": now_iso(),
         "elapsed_seconds": {
             "fetch": fetch_elapsed,
@@ -1420,6 +1523,8 @@ def build_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     print(f"- skipped papers without enough text: {skipped_count}")
     print(f"- model name: {args.model_name}")
     print(f"- FAISS index path: {args.index_path}")
+    print(f"- FTS5 database: {args.db}")
+    print(f"- FTS5 table: papers_fts ({fts_row_count} indexed papers)")
     print(f"- metadata path: {args.metadata_path}")
     print(f"- manifest path: {args.manifest_path}")
     print(f"- fetch time: {format_seconds(fetch_elapsed)}")
@@ -1454,6 +1559,7 @@ def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str,
     skipped_count = len(articles) - len(index_records)
     if not index_records:
         raise RuntimeError("No eligible papers with abstracts were available for indexing.")
+    fts_row_count = create_or_replace_fts_index(args.build_from_existing_db, index_records)
 
     texts = [build_paper_text(record["title"], record["abstract"]) for record in index_records]
 
@@ -1482,6 +1588,9 @@ def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str,
         "num_indexed_papers": len(index_records),
         "num_loaded_articles": len(articles),
         "num_skipped_papers": skipped_count,
+        "fts5_db_path": args.build_from_existing_db,
+        "fts5_table": "papers_fts",
+        "fts5_row_count": fts_row_count,
         "built_at": now_iso(),
         "elapsed_seconds": {
             "load_db": load_elapsed,
@@ -1508,6 +1617,8 @@ def build_index_from_existing_db_pipeline(args: argparse.Namespace) -> dict[str,
     print(f"- skipped papers without enough text: {skipped_count}")
     print(f"- model name: {args.model_name}")
     print(f"- FAISS index path: {args.index_path}")
+    print(f"- FTS5 database: {args.build_from_existing_db}")
+    print(f"- FTS5 table: papers_fts ({fts_row_count} indexed papers)")
     print(f"- metadata path: {args.metadata_path}")
     print(f"- manifest path: {args.manifest_path}")
     print(f"- DB load time: {format_seconds(load_elapsed)}")
@@ -1523,11 +1634,13 @@ def build_index_from_unified_records(
     manifest: dict[str, Any],
     total_loaded_rows: int,
     start_total: float,
+    fts_db_path: str,
 ) -> dict[str, Any]:
     index_records = unified_records_to_index_records(records)
     skipped_count = total_loaded_rows - len(index_records)
     if not index_records:
         raise RuntimeError("No eligible papers contain sufficient text for indexing.")
+    fts_row_count = create_or_replace_fts_index(fts_db_path, index_records)
 
     texts = [build_paper_text(record["title"], record["abstract"]) for record in index_records]
     print(f"[info] Eligible for embedding: {len(index_records)}")
@@ -1558,6 +1671,9 @@ def build_index_from_unified_records(
             "vector_dimension": int(embeddings.shape[1]),
             "num_indexed_papers": len(index_records),
             "num_skipped_papers": skipped_count,
+            "fts5_db_path": fts_db_path,
+            "fts5_table": "papers_fts",
+            "fts5_row_count": fts_row_count,
             "built_at": now_iso(),
             "elapsed_seconds": total_elapsed,
             "timings": {
@@ -1609,11 +1725,14 @@ def build_single_database_positional_pipeline(args: argparse.Namespace) -> dict[
         manifest=manifest,
         total_loaded_rows=len(articles),
         start_total=start_total,
+        fts_db_path=db_path,
     )
 
     print("\nBuild summary")
     print(f"- source DB: {db_path}")
     print(f"- FAISS index: {args.index_path}")
+    print(f"- FTS5 database: {manifest['fts5_db_path']}")
+    print(f"- FTS5 table: {manifest['fts5_table']} ({manifest['fts5_row_count']} indexed papers)")
     print(f"- metadata: {args.metadata_path}")
     print(f"- manifest: {args.manifest_path}")
     return manifest
@@ -1657,6 +1776,7 @@ def build_merged_databases_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         manifest=manifest,
         total_loaded_rows=len(records),
         start_total=start_total,
+        fts_db_path=output_db_path,
     )
 
     print("\nBuild summary")
@@ -1665,6 +1785,8 @@ def build_merged_databases_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     print(f"- merged rows: {merge_result['num_rows_after_deduplication']}")
     print(f"- indexed papers: {manifest['num_indexed_papers']}")
     print(f"- FAISS index: {args.index_path}")
+    print(f"- FTS5 database: {manifest['fts5_db_path']}")
+    print(f"- FTS5 table: {manifest['fts5_table']} ({manifest['fts5_row_count']} indexed papers)")
     print(f"- metadata: {args.metadata_path}")
     print(f"- manifest: {args.manifest_path}")
     return manifest
@@ -1705,6 +1827,50 @@ def load_index_artifacts(
     return index, metadata, manifest
 
 
+def load_search_metadata(metadata_path: str) -> list[dict[str, Any]]:
+    if not os.path.exists(metadata_path):
+        raise RuntimeError(f"Metadata file not found: {metadata_path}")
+    with open(metadata_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    if not isinstance(metadata, list):
+        raise RuntimeError("Metadata file is invalid: expected a list.")
+    metadata_by_paper_key(metadata)
+    return metadata
+
+
+def metadata_by_paper_key(metadata: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    for item in metadata:
+        source = str(item.get("source") or "").strip()
+        external_id = str(item.get("external_id") or "").strip()
+        paper_key = str(item.get("paper_key") or "").strip() or (
+            f"{source}:{external_id}" if source and external_id else ""
+        )
+        if not paper_key:
+            raise RuntimeError("Metadata contains an item without a stable paper_key.")
+        if paper_key in by_key:
+            raise RuntimeError(f"Metadata contains duplicate paper_key `{paper_key}`.")
+        if not item.get("paper_key"):
+            item["paper_key"] = paper_key
+        by_key[paper_key] = item
+    return by_key
+
+
+def resolve_search_artifacts(args: argparse.Namespace) -> SearchArtifacts:
+    source = str(args.artifact_target or "").strip()
+    if source not in STAGE2_SOURCE_TARGETS:
+        raise ValueError("Stage 2 requires exactly one source selector: --all or --arxiv")
+
+    default_index, default_metadata, default_manifest = derive_artifact_paths_for_target(source)
+    return SearchArtifacts(
+        source=source,
+        sqlite_path=f"{source}.sqlite",
+        index_path=args.index_path if args._index_path_explicit else default_index,
+        metadata_path=args.metadata_path if args._metadata_path_explicit else default_metadata,
+        manifest_path=args.manifest_path if args._manifest_path_explicit else default_manifest,
+    )
+
+
 def encode_query_with_specter(interest: str, model_name: str) -> np.ndarray:
     interest = interest.strip()
     if not interest:
@@ -1741,6 +1907,221 @@ def build_search_results(
     return results
 
 
+def search_semantic_pool(
+    index: Any,
+    metadata: list[dict[str, Any]],
+    query_embedding: np.ndarray,
+    limit: int,
+    min_score: float | None = None,
+) -> list[dict[str, Any]]:
+    scores, indices = search_faiss_index(index, query_embedding, limit)
+    results: list[dict[str, Any]] = []
+    for semantic_rank, (score, idx) in enumerate(zip(scores, indices), start=1):
+        idx = int(idx)
+        if idx < 0 or idx >= len(metadata):
+            continue
+        semantic_score = float(score)
+        if min_score is not None and semantic_score < min_score:
+            continue
+        item = dict(metadata[idx])
+        item["score"] = semantic_score
+        item["semantic_score"] = semantic_score
+        item["semantic_rank"] = semantic_rank
+        item["match_pool"] = "semantic"
+        results.append(item)
+    return results
+
+
+def _fts_query_terms(query: str) -> list[str]:
+    normalized = " ".join(str(query or "").split())
+    return re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)
+
+
+def build_safe_fts_query(query: str) -> str:
+    terms = _fts_query_terms(query)
+    if not terms:
+        raise ValueError("The search query contains no searchable keyword terms.")
+    quoted = [f'"{term}"' for term in terms]
+    if len(quoted) == 1:
+        return quoted[0]
+
+    phrase = f'"{" ".join(terms)}"'
+    and_candidate = " AND ".join(quoted)
+    or_candidate = " OR ".join(quoted)
+    return f"{phrase} OR ({and_candidate}) OR ({or_candidate})"
+
+
+def normalize_for_exact_match(text: str) -> str:
+    text = str(text or "").casefold()
+    text = re.sub(r"[-‐‑‒–—―_/]+", " ", text)
+    text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
+
+
+def _contains_normalized_phrase(text: str, query: str) -> bool:
+    normalized_text = normalize_for_exact_match(text)
+    normalized_query = normalize_for_exact_match(query)
+    if not normalized_text or not normalized_query:
+        return False
+    return f" {normalized_query} " in f" {normalized_text} "
+
+
+def _contains_any_query_term(text: str, query: str) -> bool:
+    text_terms = set(_fts_query_terms(normalize_for_exact_match(text)))
+    query_terms = _fts_query_terms(normalize_for_exact_match(query))
+    return bool(query_terms) and any(term in text_terms for term in query_terms)
+
+
+def search_keyword_pool(
+    db_path: str,
+    metadata: list[dict[str, Any]],
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if limit <= 0:
+        raise ValueError("Keyword search limit must be greater than 0.")
+    safe_query = build_safe_fts_query(query)
+    by_key = metadata_by_paper_key(metadata)
+    try:
+        conn = sqlite3.connect(db_path)
+        try:
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='papers_fts'"
+            ).fetchone()
+            if table_exists is None:
+                raise RuntimeError(
+                    f"Keyword index papers_fts is missing from `{db_path}`. "
+                    "Rebuild Stage 1 artifacts first."
+                )
+            rows = conn.execute(
+                """
+                SELECT
+                    paper_key,
+                    bm25(papers_fts, 0.0, 0.0, 0.0, 10.0, 1.0) AS bm25_score
+                FROM papers_fts
+                WHERE papers_fts MATCH ?
+                ORDER BY bm25_score ASC
+                LIMIT ?
+                """,
+                (safe_query, limit),
+            ).fetchall()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        if "fts5" in str(exc).lower() or "no such module" in str(exc).lower():
+            raise RuntimeError(
+                "Keyword and hybrid search require a Python SQLite build with FTS5 support."
+            ) from exc
+        raise RuntimeError(f"Keyword search failed for `{db_path}`: {exc}") from exc
+
+    results: list[dict[str, Any]] = []
+    for paper_key, bm25_score in rows:
+        metadata_item = by_key.get(str(paper_key))
+        if metadata_item is None:
+            print(
+                f"[warn] papers_fts result `{paper_key}` has no matching metadata item; skipping.",
+                file=sys.stderr,
+            )
+            continue
+        item = dict(metadata_item)
+        item["keyword_rank"] = len(results) + 1
+        item["bm25_score"] = float(bm25_score)
+        item["exact_title_match"] = _contains_normalized_phrase(item.get("title") or "", query)
+        item["title_term_match"] = _contains_any_query_term(item.get("title") or "", query)
+        item["abstract_term_match"] = _contains_any_query_term(item.get("abstract") or "", query)
+        item["match_pool"] = "keyword"
+        results.append(item)
+    return results
+
+
+def reciprocal_rank_fusion(
+    keyword_results: list[dict[str, Any]],
+    semantic_results: list[dict[str, Any]],
+    rrf_k: int,
+) -> list[dict[str, Any]]:
+    if rrf_k <= 0:
+        raise ValueError("--rrf-k must be greater than 0.")
+
+    fused: dict[str, dict[str, Any]] = {}
+    for item in keyword_results:
+        paper_key = str(item.get("paper_key") or "").strip()
+        if not paper_key:
+            raise RuntimeError("Keyword result is missing paper_key.")
+        record = dict(item)
+        record["match_pool"] = "keyword_only"
+        record["rrf_score"] = 1.0 / (rrf_k + int(item["keyword_rank"]))
+        fused[paper_key] = record
+
+    for item in semantic_results:
+        paper_key = str(item.get("paper_key") or "").strip()
+        if not paper_key:
+            raise RuntimeError("Semantic result is missing paper_key.")
+        semantic_term = 1.0 / (rrf_k + int(item["semantic_rank"]))
+        if paper_key in fused:
+            record = fused[paper_key]
+            record["semantic_rank"] = item["semantic_rank"]
+            record["semantic_score"] = item["semantic_score"]
+            record["score"] = item["semantic_score"]
+            record["match_pool"] = "both"
+            record["rrf_score"] += semantic_term
+        else:
+            record = dict(item)
+            record["match_pool"] = "semantic_only"
+            record["rrf_score"] = semantic_term
+            fused[paper_key] = record
+
+    return sorted(
+        fused.values(),
+        key=lambda item: (
+            -float(item["rrf_score"]),
+            int(item.get("keyword_rank") or 10**9),
+            int(item.get("semantic_rank") or 10**9),
+            str(item.get("paper_key") or ""),
+        ),
+    )
+
+
+def select_hybrid_top_k(
+    fused_results: list[dict[str, Any]],
+    limit: int,
+    keyword_reserved: int,
+) -> tuple[list[dict[str, Any]], int]:
+    if limit <= 0:
+        raise ValueError("--limit must be greater than 0.")
+    if keyword_reserved < 0 or keyword_reserved > limit:
+        raise ValueError("--keyword-reserved must be between 0 and --limit.")
+
+    selected: list[dict[str, Any]] = []
+    selected_keys: set[str] = set()
+    if keyword_reserved:
+        exact_matches = sorted(
+            (
+                item
+                for item in fused_results
+                if item.get("exact_title_match") and item.get("keyword_rank") is not None
+            ),
+            key=lambda item: int(item["keyword_rank"]),
+        )
+        for item in exact_matches[:keyword_reserved]:
+            selected.append(item)
+            selected_keys.add(str(item["paper_key"]))
+
+    reserved_count = len(selected)
+    for item in fused_results:
+        paper_key = str(item["paper_key"])
+        if paper_key in selected_keys:
+            continue
+        selected.append(item)
+        selected_keys.add(paper_key)
+        if len(selected) >= limit:
+            break
+
+    selected = selected[:limit]
+    for hybrid_rank, item in enumerate(selected, start=1):
+        item["hybrid_rank"] = hybrid_rank
+    return selected, reserved_count
+
+
 def _format_authors(authors: Any) -> str:
     if not authors:
         return "N/A"
@@ -1761,38 +2142,79 @@ def _abstract_preview(abstract: Any, limit: int = 500) -> str:
     return text
 
 
-def print_search_results(results: list[dict[str, Any]]) -> None:
+def _display_value(value: Any, digits: int | None = None) -> str:
+    if value is None or value == "":
+        return "N/A"
+    if digits is not None:
+        return f"{float(value):.{digits}f}"
+    return str(value)
+
+
+def _print_paper_fields(item: dict[str, Any]) -> None:
+    doi = str(item.get("doi") or "").strip()
+    print(f"Source: {item.get('source') or 'N/A'}")
+    print(f"External ID: {item.get('external_id') or 'N/A'}")
+    print(f"Title: {item.get('title') or 'N/A'}")
+    print(f"PMID: {item.get('pmid') or 'N/A'}")
+    print(f"Journal/Venue: {item.get('journal') or item.get('venue') or 'N/A'}")
+    print(f"Date: {item.get('pub_date') or item.get('published_date') or 'N/A'}")
+    if doi:
+        print(f"DOI: {doi}")
+    print(f"Authors: {_format_authors(item.get('authors'))}")
+    print(f"URL: {item.get('url') or 'N/A'}")
+    print(f"Abstract: {_abstract_preview(item.get('abstract'))}")
+    print()
+
+
+def print_semantic_results(results: list[dict[str, Any]]) -> None:
     if not results:
         print("[done] No matching papers found.")
         return
 
     for rank, item in enumerate(results, start=1):
-        doi = str(item.get("doi") or "").strip()
-        print(f"#{rank} | score={float(item.get('score', 0.0)):.4f}")
-        print(f"Source: {item.get('source') or 'N/A'}")
-        print(f"Title: {item.get('title') or 'N/A'}")
-        print(f"PMID: {item.get('pmid') or 'N/A'}")
-        print(f"Journal: {item.get('journal') or 'N/A'}")
-        print(f"Date: {item.get('pub_date') or 'N/A'}")
-        if doi:
-            print(f"DOI: {doi}")
-        print(f"Authors: {_format_authors(item.get('authors'))}")
-        print(f"URL: {item.get('url') or 'N/A'}")
-        print(f"Abstract: {_abstract_preview(item.get('abstract'))}")
-        print()
+        print(
+            f"#{rank} | semantic_rank={item['semantic_rank']} | "
+            f"semantic_score={float(item['semantic_score']):.4f}"
+        )
+        print("Match pool: semantic")
+        _print_paper_fields(item)
 
 
-def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
-    start_total = time.perf_counter()
+def print_keyword_results(results: list[dict[str, Any]]) -> None:
+    if not results:
+        print("[done] No matching papers found.")
+        return
+    for rank, item in enumerate(results, start=1):
+        print(
+            f"#{rank} | keyword_rank={item['keyword_rank']} | "
+            f"bm25_score={float(item['bm25_score']):.4f}"
+        )
+        print("Match pool: keyword")
+        print(f"Exact title match: {'yes' if item.get('exact_title_match') else 'no'}")
+        print(f"Title term match: {'yes' if item.get('title_term_match') else 'no'}")
+        print(f"Abstract term match: {'yes' if item.get('abstract_term_match') else 'no'}")
+        _print_paper_fields(item)
 
-    start_load = time.perf_counter()
-    index, metadata, manifest = load_index_artifacts(
-        args.index_path,
-        args.metadata_path,
-        args.manifest_path,
-    )
-    load_elapsed = time.perf_counter() - start_load
 
+def print_hybrid_results(results: list[dict[str, Any]]) -> None:
+    if not results:
+        print("[done] No matching papers found.")
+        return
+    for rank, item in enumerate(results, start=1):
+        print(
+            f"#{rank} | hybrid_rank={item['hybrid_rank']} | "
+            f"rrf_score={float(item['rrf_score']):.4f}"
+        )
+        print(f"Match pool: {item.get('match_pool') or 'N/A'}")
+        print(f"Keyword rank: {_display_value(item.get('keyword_rank'))}")
+        print(f"Semantic rank: {_display_value(item.get('semantic_rank'))}")
+        print(f"BM25 score: {_display_value(item.get('bm25_score'), 4)}")
+        print(f"Semantic score: {_display_value(item.get('semantic_score'), 4)}")
+        print(f"Exact title match: {'yes' if item.get('exact_title_match') else 'no'}")
+        _print_paper_fields(item)
+
+
+def _semantic_model_name(args: argparse.Namespace, manifest: dict[str, Any]) -> str:
     manifest_model_name = str(manifest.get("model_name") or "").strip()
     model_name = args.model_name
     if manifest_model_name:
@@ -1803,6 +2225,24 @@ def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
             )
         else:
             model_name = manifest_model_name
+    return model_name
+
+
+def search_semantic_pipeline(
+    args: argparse.Namespace,
+    artifacts: SearchArtifacts,
+) -> dict[str, Any]:
+    start_total = time.perf_counter()
+
+    start_load = time.perf_counter()
+    index, metadata, manifest = load_index_artifacts(
+        artifacts.index_path,
+        artifacts.metadata_path,
+        artifacts.manifest_path,
+    )
+    metadata_by_paper_key(metadata)
+    load_elapsed = time.perf_counter() - start_load
+    model_name = _semantic_model_name(args, manifest)
 
     start_embed = time.perf_counter()
     query_embedding = encode_query_with_specter(args.interest, model_name)
@@ -1815,24 +2255,24 @@ def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         k = min(args.limit, index.ntotal)
 
     start_search = time.perf_counter()
-    scores, indices = search_faiss_index(index, query_embedding, k)
+    results = search_semantic_pool(index, metadata, query_embedding, k, args.min_score)
     search_elapsed = time.perf_counter() - start_search
-    results = build_search_results(scores, indices, metadata, args.min_score)
     total_elapsed = time.perf_counter() - start_total
 
     print("\nSearch summary")
-    print(f"- loaded index path: {args.index_path}")
+    print("- search mode: semantic")
+    print(f"- selected source: {artifacts.source}")
+    print(f"- FAISS index path: {artifacts.index_path}")
     print(f"- indexed papers: {index.ntotal}")
-    print(f"- user interest: {args.interest}")
-    print(f"- limit used: {k}")
+    print(f"- query: {args.interest}")
+    print(f"- limit: {k}")
     print(f"- min score: {args.min_score if args.min_score is not None else 'none'}")
-    print(f"- model name: {model_name}")
     print(f"- load time: {format_seconds(load_elapsed)}")
     print(f"- query embedding time: {format_seconds(embed_elapsed)}")
     print(f"- FAISS search time: {format_seconds(search_elapsed)}")
     print(f"- total time: {format_seconds(total_elapsed)}")
     print()
-    print_search_results(results)
+    print_semantic_results(results)
 
     return {
         "num_results": len(results),
@@ -1841,6 +2281,143 @@ def search_index_pipeline(args: argparse.Namespace) -> dict[str, Any]:
         "search_elapsed": search_elapsed,
         "total_elapsed": total_elapsed,
     }
+
+
+def search_keyword_pipeline(
+    args: argparse.Namespace,
+    artifacts: SearchArtifacts,
+) -> dict[str, Any]:
+    start_total = time.perf_counter()
+    metadata = load_search_metadata(artifacts.metadata_path)
+    limit = len(metadata) if args.limit is None else min(args.limit, len(metadata))
+    if limit <= 0:
+        raise ValueError("--limit must be greater than 0.")
+    safe_query = build_safe_fts_query(args.interest)
+
+    start_keyword = time.perf_counter()
+    results = search_keyword_pool(artifacts.sqlite_path, metadata, args.interest, limit)
+    keyword_elapsed = time.perf_counter() - start_keyword
+    total_elapsed = time.perf_counter() - start_total
+
+    print("\nSearch summary")
+    print("- search mode: keyword")
+    print(f"- selected source: {artifacts.source}")
+    print(f"- SQLite path: {artifacts.sqlite_path}")
+    print("- FTS table: papers_fts")
+    print(f"- query: {args.interest}")
+    print(f"- safe FTS query: {safe_query}")
+    print(f"- limit: {limit}")
+    print(f"- keyword results: {len(results)}")
+    print(f"- SQLite keyword-search time: {format_seconds(keyword_elapsed)}")
+    print(f"- total time: {format_seconds(total_elapsed)}")
+    print()
+    print_keyword_results(results)
+    return {
+        "num_results": len(results),
+        "keyword_elapsed": keyword_elapsed,
+        "total_elapsed": total_elapsed,
+    }
+
+
+def search_hybrid_pipeline(
+    args: argparse.Namespace,
+    artifacts: SearchArtifacts,
+) -> dict[str, Any]:
+    start_total = time.perf_counter()
+    index, metadata, manifest = load_index_artifacts(
+        artifacts.index_path,
+        artifacts.metadata_path,
+        artifacts.manifest_path,
+    )
+    metadata_by_paper_key(metadata)
+    final_limit = len(metadata) if args.limit is None else min(args.limit, len(metadata))
+    if final_limit <= 0:
+        raise ValueError("--limit must be greater than 0.")
+    if args.keyword_reserved < 0 or args.keyword_reserved > final_limit:
+        raise ValueError("--keyword-reserved must be between 0 and --limit.")
+    effective_pool_size = min(max(args.pool_size, final_limit), len(metadata))
+    model_name = _semantic_model_name(args, manifest)
+
+    start_keyword = time.perf_counter()
+    keyword_results = search_keyword_pool(
+        artifacts.sqlite_path,
+        metadata,
+        args.interest,
+        effective_pool_size,
+    )
+    keyword_elapsed = time.perf_counter() - start_keyword
+
+    start_embed = time.perf_counter()
+    query_embedding = encode_query_with_specter(args.interest, model_name)
+    embed_elapsed = time.perf_counter() - start_embed
+
+    start_faiss = time.perf_counter()
+    semantic_results = search_semantic_pool(
+        index,
+        metadata,
+        query_embedding,
+        effective_pool_size,
+        args.min_score,
+    )
+    faiss_elapsed = time.perf_counter() - start_faiss
+
+    start_fusion = time.perf_counter()
+    fused_results = reciprocal_rank_fusion(keyword_results, semantic_results, args.rrf_k)
+    final_results, reserved_count = select_hybrid_top_k(
+        fused_results,
+        final_limit,
+        args.keyword_reserved,
+    )
+    fusion_elapsed = time.perf_counter() - start_fusion
+    total_elapsed = time.perf_counter() - start_total
+
+    overlap_count = sum(item.get("match_pool") == "both" for item in fused_results)
+    keyword_only_count = sum(item.get("match_pool") == "keyword_only" for item in fused_results)
+    semantic_only_count = sum(item.get("match_pool") == "semantic_only" for item in fused_results)
+    union_before_dedup = len(keyword_results) + len(semantic_results)
+
+    print("\nSearch summary")
+    print("- search mode: hybrid")
+    print(f"- selected source: {artifacts.source}")
+    print(f"- SQLite path: {artifacts.sqlite_path}")
+    print(f"- FAISS index path: {artifacts.index_path}")
+    print(f"- query: {args.interest}")
+    print(f"- keyword candidate count: {len(keyword_results)}")
+    print(f"- semantic candidate count: {len(semantic_results)}")
+    print(f"- candidate union size before deduplication: {union_before_dedup}")
+    print(f"- unique candidate count after deduplication: {len(fused_results)}")
+    print(f"- overlap count: {overlap_count}")
+    print(f"- keyword-only count: {keyword_only_count}")
+    print(f"- semantic-only count: {semantic_only_count}")
+    print(f"- effective pool size: {effective_pool_size}")
+    print(f"- RRF k: {args.rrf_k}")
+    print(f"- keyword reserved requested: {args.keyword_reserved}")
+    print(f"- exact title matches reserved: {reserved_count}")
+    print(f"- final limit: {final_limit}")
+    print(f"- keyword-search time: {format_seconds(keyword_elapsed)}")
+    print(f"- semantic embedding time: {format_seconds(embed_elapsed)}")
+    print(f"- FAISS-search time: {format_seconds(faiss_elapsed)}")
+    print(f"- fusion time: {format_seconds(fusion_elapsed)}")
+    print(f"- total time: {format_seconds(total_elapsed)}")
+    print()
+    print_hybrid_results(final_results)
+    return {
+        "num_results": len(final_results),
+        "keyword_candidates": len(keyword_results),
+        "semantic_candidates": len(semantic_results),
+        "unique_candidates": len(fused_results),
+        "reserved_count": reserved_count,
+        "total_elapsed": total_elapsed,
+    }
+
+
+def search_stage2_pipeline(args: argparse.Namespace) -> dict[str, Any]:
+    artifacts = resolve_search_artifacts(args)
+    if args.search_mode == "keyword":
+        return search_keyword_pipeline(args, artifacts)
+    if args.search_mode == "hybrid":
+        return search_hybrid_pipeline(args, artifacts)
+    return search_semantic_pipeline(args, artifacts)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -1898,14 +2475,41 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--interest", default="", help="Specific user interest to search against the saved index")
     parser.add_argument("--limit", type=int, default=None, help="Return top K matches; omit to return all")
     parser.add_argument("--min-score", type=float, default=None, help="Only print results with score >= min score")
+    parser.add_argument(
+        "--search-mode",
+        choices=["semantic", "keyword", "hybrid"],
+        default="semantic",
+        help="Stage 2 retrieval mode.",
+    )
+    parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=100,
+        help="Candidates retrieved from each pool before hybrid fusion.",
+    )
+    parser.add_argument(
+        "--rrf-k",
+        type=int,
+        default=60,
+        help="Reciprocal Rank Fusion smoothing constant.",
+    )
+    parser.add_argument(
+        "--keyword-reserved",
+        type=int,
+        default=3,
+        help=(
+            "Maximum exact-title keyword matches reserved in final hybrid "
+            "results. Use 0 for pure RRF."
+        ),
+    )
     artifact_group = parser.add_mutually_exclusive_group()
-    for target in SEARCH_ARTIFACT_TARGETS:
+    for target in STAGE2_SOURCE_TARGETS:
         artifact_group.add_argument(
             f"--{target}",
             dest="artifact_target",
             action="store_const",
             const=target,
-            help=f"Use {target}_specter.index, {target}_metadata.json, and {target}_manifest.json for search",
+            help=f"Search the {target} Stage 2 artifacts",
         )
     parser.set_defaults(artifact_target="")
     argv = _normalize_cli_argv(sys.argv[1:])
@@ -1914,25 +2518,9 @@ def _parse_args() -> argparse.Namespace:
     index_path_explicit = any(arg == "--index-path" or arg.startswith("--index-path=") for arg in argv)
     metadata_path_explicit = any(arg == "--metadata-path" or arg.startswith("--metadata-path=") for arg in argv)
     manifest_path_explicit = any(arg == "--manifest-path" or arg.startswith("--manifest-path=") for arg in argv)
-    if (
-        args.interest
-        and args.sqlite_target in SEARCH_ARTIFACT_TARGETS
-        and not args.artifact_target
-        and not os.path.exists(str(args.sqlite_target))
-    ):
-        args.artifact_target = args.sqlite_target
-        args.sqlite_target = None
-
-    if args.artifact_target:
-        derived_index_path, derived_metadata_path, derived_manifest_path = derive_artifact_paths_for_target(
-            args.artifact_target
-        )
-        if not index_path_explicit:
-            args.index_path = derived_index_path
-        if not metadata_path_explicit:
-            args.metadata_path = derived_metadata_path
-        if not manifest_path_explicit:
-            args.manifest_path = derived_manifest_path
+    args._index_path_explicit = index_path_explicit
+    args._metadata_path_explicit = metadata_path_explicit
+    args._manifest_path_explicit = manifest_path_explicit
 
     if args.sqlite_target:
         derived_index_path, derived_metadata_path, derived_manifest_path = derive_artifact_paths(args.sqlite_target)
@@ -1949,6 +2537,18 @@ def main() -> int:
     args = _parse_args()
 
     try:
+        if args.interest and args.artifact_target not in STAGE2_SOURCE_TARGETS:
+            raise ValueError("Stage 2 requires exactly one source selector: --all or --arxiv")
+        if args.interest and args.limit is not None and args.limit <= 0:
+            raise ValueError("--limit must be greater than 0.")
+        if args.interest and args.search_mode == "hybrid":
+            if args.pool_size <= 0:
+                raise ValueError("--pool-size must be greater than 0.")
+            if args.rrf_k <= 0:
+                raise ValueError("--rrf-k must be greater than 0.")
+            if args.keyword_reserved < 0:
+                raise ValueError("--keyword-reserved must be greater than or equal to 0.")
+
         if not args.sqlite_target and not args.build_index and not args.build_from_existing_db and not args.interest:
             print(
                 "Choose a mode: run `python All_embedding.py arxiv.sqlite`, "
@@ -1972,7 +2572,7 @@ def main() -> int:
             build_index_from_existing_db_pipeline(args)
 
         if args.interest:
-            search_index_pipeline(args)
+            search_stage2_pipeline(args)
 
         return 0
     except KeyboardInterrupt:
