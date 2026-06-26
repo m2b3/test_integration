@@ -10,7 +10,8 @@ export async function requestJson(path, options = {}) {
   })
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`)
+    const message = await response.text()
+    throw new Error(message || `API request failed: ${response.status}`)
   }
 
   return response.json()
