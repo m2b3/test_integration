@@ -1,0 +1,399 @@
+.app-shell {
+  min-height: 100svh;
+  padding: 28px 20px 56px;
+}
+
+.topbar {
+  align-items: flex-start;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin: 0 auto 24px;
+  max-width: 1000px;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.topbar h1 {
+  color: var(--text-strong);
+  font-size: 32px;
+  line-height: 1.12;
+  margin: 0;
+}
+
+.profile-button,
+.primary-button,
+.secondary-button,
+.icon-button,
+.match-control button,
+.selected-tags button,
+.profile-tags button,
+.suggestions button {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+}
+
+.profile-button {
+  background: var(--surface-strong);
+  border-color: var(--border);
+  border-radius: 8px;
+  color: var(--text-strong);
+  min-height: 40px;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
+.profile-button:hover,
+.secondary-button:hover,
+.selected-tags button:hover,
+.profile-tags button:hover {
+  border-color: var(--accent);
+}
+
+.feed-layout {
+  margin: 0 auto;
+  max-width: 1000px;
+}
+
+.filter-bar {
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  padding: 14px;
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+}
+
+.filter-grid {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1.2fr) minmax(130px, 0.7fr) auto;
+}
+
+.field {
+  color: var(--text);
+  display: grid;
+  gap: 6px;
+  position: relative;
+  text-align: left;
+}
+
+.field span,
+.profile-match > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input,
+select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-strong);
+  font: inherit;
+  min-height: 40px;
+  outline: none;
+  padding: 8px 10px;
+}
+
+input:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.suggestions {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+  display: grid;
+  gap: 4px;
+  left: 0;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 10;
+}
+
+.suggestions button {
+  background: transparent;
+  border-radius: 6px;
+  color: var(--text-strong);
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.suggestions button:hover {
+  background: var(--accent-soft);
+}
+
+.match-control {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  min-height: 40px;
+  overflow: hidden;
+}
+
+.match-control button {
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  padding: 8px 11px;
+}
+
+.match-control button.is-active {
+  background: var(--accent);
+  color: white;
+}
+
+.selected-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  min-height: 0;
+}
+
+.selected-tags button,
+.tag-chip,
+.profile-tags button {
+  align-items: center;
+  background: var(--tag-bg);
+  border: 1px solid var(--tag-border);
+  border-radius: 999px;
+  color: var(--tag-text);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 6px;
+  line-height: 1;
+  min-height: 28px;
+  padding: 6px 10px;
+}
+
+.selected-tags .clear-button {
+  background: transparent;
+  color: var(--muted);
+}
+
+.feed-summary {
+  color: var(--muted);
+  display: flex;
+  font-size: 14px;
+  justify-content: space-between;
+  margin: 14px 2px;
+}
+
+.article-list {
+  display: grid;
+  gap: 12px;
+}
+
+.article-card {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: left;
+}
+
+.article-card h2 {
+  color: var(--text-strong);
+  font-size: 20px;
+  line-height: 1.25;
+  margin: 8px 0 10px;
+}
+
+.article-meta {
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+  gap: 10px;
+}
+
+.authors {
+  color: var(--text);
+  margin: 0 0 16px;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empty-state {
+  background: var(--surface-strong);
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  padding: 32px;
+  text-align: center;
+}
+
+.empty-state h2 {
+  color: var(--text-strong);
+  margin: 0 0 6px;
+}
+
+.empty-state p {
+  color: var(--muted);
+  margin: 0;
+}
+
+.modal-backdrop {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 20px;
+  position: fixed;
+  z-index: 20;
+}
+
+.profile-modal {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+  max-height: min(760px, calc(100svh - 40px));
+  max-width: 680px;
+  overflow: auto;
+  padding: 20px;
+  width: min(100%, 680px);
+}
+
+.modal-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.modal-header h2 {
+  color: var(--text-strong);
+  font-size: 24px;
+  margin: 0;
+}
+
+.icon-button {
+  background: var(--surface);
+  border-color: var(--border);
+  border-radius: 8px;
+  color: var(--text-strong);
+  height: 34px;
+  width: 34px;
+}
+
+.profile-fields {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.profile-match {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin: 18px 0 12px;
+}
+
+.profile-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-tags button.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.primary-button,
+.secondary-button {
+  border-radius: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: white;
+}
+
+.secondary-button {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    padding: 18px 12px 40px;
+  }
+
+  .topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .topbar h1 {
+    font-size: 26px;
+  }
+
+  .filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feed-summary {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .article-card {
+    padding: 16px;
+  }
+
+  .article-card h2 {
+    font-size: 18px;
+  }
+
+  .profile-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-match,
+  .modal-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
