@@ -1,8 +1,11 @@
+# Paper metadata collectors
 biopython==1.86
 requests>=2.32.0
 feedparser>=6.0.12
 beautifulsoup4>=4.13.0
-openreview-py
+openreview-py>=2.2.0
+
+# Embedding and vector search
 numpy==2.4.4
 sentence-transformers>=3.0.0
-faiss-cpu
+faiss-cpu>=1.13.0

@@ -1,106 +1,90 @@
-# RSS ingestion
+# RSS and Journal Feed Ingestion
 
-`rss.py` fetches articles from a single RSS or Atom feed, normalizes paper-like metadata, keeps records from the past 24 hours by default, and stores them in a local SQLite database.
+This repository includes a small RSS/Atom workflow for collecting recent journal articles into SQLite. Use `rss.py` when you already know the feed URL, and use `rss_discover_journal.py` when you want the project to look up a journal, discover candidate feeds, validate them, and ingest the best match.
 
-The script is useful for journal or publisher feeds that expose recent article metadata through RSS.
+RSS databases can be merged and indexed later by `All_embedding.py` alongside PubMed, arXiv, bioRxiv, medRxiv, PsyArXiv, SocArXiv, and OpenReview databases.
 
-## Basic usage
+## Setup
 
-```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss"
-```
-
-`-x` / `--source` is a short source slug. It is normalized and used to choose the output database name. For example:
+Install the project dependencies from the shared requirements file:
 
 ```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss"
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-writes to:
+The RSS tools use:
 
-```text
-nature.sqlite
-```
+- `feedparser` for RSS/Atom parsing
+- `requests` for Crossref and homepage/feed discovery
+- `beautifulsoup4` for HTML feed autodiscovery
 
-## Common examples
+## Ingest a Known Feed
 
-Process at most 100 feed entries:
-
-```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss" --max 100
-```
-
-Refresh existing rows for the RSS IDs seen in the current run:
-
-```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss" --refresh
-```
-
-Store every parsed feed entry instead of filtering to the past 24 hours:
-
-```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss" --no-date-filter
-```
-
-Use a custom HTTP User-Agent:
+Run `rss.py` with a short source slug and a feed URL:
 
 ```bash
 python rss.py \
-  -x nature \
-  --feed-url "https://www.nature.com/nature.rss" \
-  --user-agent "my-rss-ingester/1.0"
+  --source nature \
+  --feed-url "https://www.nature.com/nature.rss"
 ```
 
-Sleep after fetching the feed, which can be helpful when chaining polite requests:
+The source slug is normalized and used as the output database name. For example, `--source nature` writes `nature.sqlite`.
+
+Useful options:
+
+- `--max`: cap feed entries processed; `0` means no cap.
+- `--refresh`: replace existing rows for RSS IDs seen in the current run.
+- `--no-date-filter`: store every parsed feed entry instead of only recent entries.
+- `--sleep`: sleep after fetching the feed, useful when chaining polite requests.
+- `--user-agent`: override the HTTP User-Agent sent to the feed.
+
+Examples:
 
 ```bash
-python rss.py -x nature --feed-url "https://www.nature.com/nature.rss" --sleep 2
+python rss.py --source nature --feed-url "https://www.nature.com/nature.rss" --max 100
+python rss.py --source nature --feed-url "https://www.nature.com/nature.rss" --refresh
+python rss.py --source nature --feed-url "https://www.nature.com/nature.rss" --no-date-filter
 ```
 
-## Command-line options
+## Discover a Journal Feed
 
-- `-x`, `--source`: required short source slug used for the output database name.
-- `--feed-url`: required RSS or Atom feed URL.
-- `--max`: optional cap on feed entries processed. `0` means no cap.
-- `--sleep`: seconds to sleep after fetching the feed. Default is `0`.
-- `--refresh`: delete existing rows for fetched RSS IDs before inserting the current records.
-- `--no-date-filter`: store all parsed feed entries instead of only recent entries.
-- `--user-agent`: HTTP User-Agent sent when requesting the feed.
+Run `rss_discover_journal.py` with a journal name:
 
-## Date filtering
+```bash
+python rss_discover_journal.py --journal "Nature"
+```
 
-By default, `rss.py` stores records whose `updated_date` or `pub_date` is within the past 24 hours.
+The discovery script:
+
+1. Queries Crossref for journal candidates.
+2. Selects the best matching title.
+3. Builds likely homepage and direct-feed candidates.
+4. Looks for RSS/Atom `<link rel="alternate">` entries on working homepages.
+5. Validates candidate feeds by parsing entries.
+6. Ingests the selected feed into `<journal-slug>.sqlite`.
+
+You can pass an email for Crossref's polite pool:
+
+```bash
+python rss_discover_journal.py --journal "Nature" --mailto "you@example.com"
+```
+
+The discovery script supports the same ingest options as `rss.py` for `--max`, `--refresh`, `--no-date-filter`, and `--user-agent`.
+
+## Date Filtering
+
+By default, both RSS ingestion paths keep entries whose `updated_date` or `pub_date` is within the last 24 hours.
 
 If an entry has no usable published or updated date, the script keeps it and prints a warning. This prevents undated feeds from silently dropping all records.
 
 Use `--no-date-filter` when you want to backfill all entries currently exposed by a feed.
 
-## Normalized fields
+## SQLite Output
 
-Each RSS entry is normalized into a record with:
-
-- `rss_id`
-- `source`
-- `title`
-- `journal`
-- `pub_date`
-- `updated_date`
-- `doi`
-- `authors`
-- `abstract`
-- `categories`
-- `primary_category`
-- `url`
-- `pdf_url`
-- `feed_url`
-- `fetched_at`
-- `raw_json`
-
-The script tries to extract DOI values from common feed fields such as `doi`, `prism_doi`, `dc_identifier`, `identifier`, `id`, `guid`, `link`, `title`, `summary`, and `description`.
-
-## SQLite schema
-
-The output database contains one table, `rss_articles`.
+Each RSS entry is normalized into the `rss_articles` table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS rss_articles (
@@ -123,40 +107,35 @@ CREATE TABLE IF NOT EXISTS rss_articles (
 );
 ```
 
-The table also has indexes on:
-
-- `source`
-- `pub_date`
-- `updated_date`
+Indexes are created on `source`, `pub_date`, and `updated_date`.
 
 ## Deduplication
 
 Rows are deduplicated by `rss_id`.
 
-The `rss_id` is built in this order:
+The ID is built in this order:
 
 1. DOI, when available: `doi:<normalized-doi>`
-2. feed entry ID or GUID: `id:<entry-id>`
-3. article URL: `url:<url>`
+2. Feed entry ID or GUID: `id:<entry-id>`
+3. Article URL: `url:<url>`
 4. SHA-256 hash of title, URL, and publication date: `hash:<digest>`
 
-Without `--refresh`, existing rows are skipped with `INSERT OR IGNORE`.
+Without `--refresh`, existing rows are skipped with `INSERT OR IGNORE`. With `--refresh`, rows matching the current run's RSS IDs are deleted first and reinserted from the current feed payload.
 
-With `--refresh`, rows matching the current run's RSS IDs are deleted first, then reinserted from the current feed payload.
+## Feed Utility Scripts
 
-## Dependencies
+The repository also includes helper scripts for maintaining and checking feed lists:
 
-`rss.py` uses Python's standard library for HTTP requests and SQLite, but it requires `feedparser` to parse RSS/Atom payloads.
+- `check_rss_feeds.py`: validates `rss_feeds_raw.json` and writes checked, summary, and blocked-feed JSON outputs.
+- `scrape_feedspot_science.py`: discovers and checks feeds from Feedspot's public science list.
+- `scrape_aps_feeds.py`: parses a local `aps_feeds.html` snapshot and checks discovered APS feeds.
+- `scrape_oup_rss.py`: parses a local `oup_rss.html` snapshot and checks OUP feeds; set `OUP_COOKIE` when a browser-derived cookie is needed.
 
-Install it with:
+The feed-checking utilities currently classify active feeds as those with a latest item dated in 2025 or 2026.
 
-```bash
-pip install feedparser
-```
+## Example Output
 
-## Output
-
-A successful run prints progress messages similar to:
+A successful `rss.py` run prints progress messages similar to:
 
 ```text
 [info] source=nature feed_url=https://www.nature.com/nature.rss db_path=nature.sqlite

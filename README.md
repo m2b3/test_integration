@@ -1,478 +1,384 @@
-# infogather
+# Scientific communication data pipeline
 
-This repository contains small ingestion tools for scientific paper metadata. The PubMed script fetches records that were added or updated in the last 24 hours, extracts a useful subset of fields, and stores them in a local SQLite database with deduplication by PMID. The OSF preprint scripts fetch recent PsyArXiv and SocArXiv records into a shared SQLite schema. The OpenReview script fetches visible submissions for a specific venue into SQLite.
+This repository collects recent scientific papers and science-related social posts into SQLite, then builds searchable scientific-paper indexes with SPECTER, FAISS, and SQLite FTS（Full text search).
 
-The project has several Python entrypoints:
+The main paper workflow covers six daily sources:
 
-- `base.py`: main ingestion script
-- `embedding.py`: interactive semantic recommendation workflow built on top of the same PubMed/SQLite ingestion logic
-- `psyarxiv.py`: fetch recent PsyArXiv preprints into SQLite
-- `socarxiv.py`: fetch recent SocArXiv preprints into SQLite
-- `osf_preprints.py`: shared OSF preprints API and SQLite helper logic used by the PsyArXiv and SocArXiv wrappers
-- `openreview.py`: fetch publicly visible OpenReview submissions for one venue into SQLite
+- arXiv
+- PubMed
+- bioRxiv
+- medRxiv
+- PsyArXiv
+- SocArXiv
 
-The PubMed workflow uses Biopython's `Bio.Entrez` client by default and can optionally use external NCBI EDirect tools if they are installed, but EDirect is not required. The OSF preprint workflow uses `requests` against the OSF API v2. The OpenReview workflow uses `openreview-py` against the OpenReview API v2.
+Additional standalone tools ingest OpenReview venues, journal RSS/Atom feeds, Bluesky posts, and Mastodon.
 
-## What `base.py` does
+## Quick start
 
-`base.py`:
-
-- queries PubMed for records in the last 24 hours
-- fetches records in XML form
-- parses fields including PMID, title, journal, publication date, DOI, authors, and abstract
-- stores parsed records in SQLite
-- avoids duplicate inserts by using PMID as the primary key
-- supports retry behavior and resumable fetch offsets for long runs
-
-Typical usage:
-
-```bash
-python base.py --db pubmed.sqlite
-```
-
-Example with a narrower search term:
-
-```bash
-python base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
-```
-
-## OSF-hosted preprint ingestion
-
-`psyarxiv.py` and `socarxiv.py` fetch recent records from OSF-hosted preprint providers and write them into provider-specific SQLite databases. Both wrappers use the shared logic in `osf_preprints.py`.
-
-`osf_preprints.py` handles:
-
-- OSF API v2 preprint pagination
-- provider validation for `psyarxiv` and `socarxiv`
-- date-window filtering using published, created, or modified timestamps
-- normalization of title, abstract, authors, DOI, categories, public URL, PDF URL, and raw JSON
-- deduplicated SQLite inserts using `(source, external_id)` as the primary key
-- fallback to recent provider pages when OSF date filters are unavailable
-
-Fetch PsyArXiv preprints from the last 24 hours:
-
-```bash
-python psyarxiv.py --db psyarxiv.sqlite
-```
-
-Fetch SocArXiv preprints from the last 24 hours:
-
-```bash
-python socarxiv.py --db socarxiv.sqlite
-```
-
-Use a different UTC lookback window:
-
-```bash
-python psyarxiv.py --db psyarxiv.sqlite --hours 72
-python socarxiv.py --db socarxiv.sqlite --hours 72
-```
-
-Limit raw OSF records fetched for a smaller test run:
-
-```bash
-python psyarxiv.py --db psyarxiv.sqlite --max-results 500
-python socarxiv.py --db socarxiv.sqlite --max-results 500
-```
-
-Apply a simple local text filter after fetching normalized records:
-
-```bash
-python psyarxiv.py --db psyarxiv.sqlite --query "cognitive bias"
-python socarxiv.py --db socarxiv.sqlite --query "social inequality"
-```
-
-Preview normalized records without writing to SQLite:
-
-```bash
-python psyarxiv.py --dry-run
-python socarxiv.py --dry-run
-```
-
-The OSF SQLite schema is a single `papers` table with:
-
-- `source`
-- `external_id`
-- `title`
-- `abstract`
-- `authors`
-- `published_date`
-- `updated_date`
-- `doi`
-- `journal`
-- `categories`
-- `url`
-- `pdf_url`
-- `fetched_at`
-- `raw_json`
-
-## OpenReview venue ingestion
-
-`openreview.py` fetches publicly visible submissions for a single OpenReview venue and saves them into `openreview.sqlite`.
-
-It handles:
-
-- venue parsing from either an OpenReview venue URL or a raw venue ID
-- automatic discovery of the venue's submission invitation
-- optional manual submission invitation selection with `--invitation`
-- fetching visible notes through OpenReview API v2
-- normalization of paper metadata, authors, PDF URL, venue fields, decisions, readers, and raw content
-- lightweight classification into `accepted`, `rejected`, `desk_rejected`, `withdrawn`, `submitted`, or `unknown`
-- printing the exact final invitation used after fetching submissions
-
-Fetch submissions by raw venue ID:
-
-```bash
-python openreview.py "ICLR.cc/2026/Conference"
-```
-
-Fetch submissions by OpenReview venue URL:
-
-```bash
-python openreview.py "https://openreview.net/group?id=ICLR.cc/2026/Conference#tab-accept-oral"
-```
-
-Provide a known submission invitation directly:
-
-```bash
-python openreview.py "ICLR.cc/2026/Conference" --invitation "ICLR.cc/2026/Conference/-/Blind_Submission"
-```
-
-When `--invitation` is provided, the script skips automatic invitation discovery but still parses and saves the `venue_id` from the positional venue argument. In both modes it prints:
-
-```text
-Invitation used: <actual invitation>
-```
-
-The OpenReview SQLite schema is a single `papers` table with:
-
-- `id`
-- `source`
-- `forum`
-- `number`
-- `title`
-- `authors`
-- `abstract`
-- `pdf_url`
-- `venue_id`
-- `venue`
-- `venueid`
-- `decision`
-- `status`
-- `presentation`
-- `readers`
-- `cdate`
-- `mdate`
-- `classification`
-- `raw_content`
-
-## Semantic paper recommendations
-
-`embedding.py` adds a persistent two-stage recommendation workflow:
-
-1. Build a daily FAISS index:
-   it fetches PubMed records added/updated in the past 24 hours using `datetype="edat"` and `reldate=1`, stores/deduplicates them in SQLite, embeds eligible title + abstract text with SPECTER, and saves a FAISS `IndexFlatIP` plus metadata and a manifest.
-2. Search the saved index:
-   it embeds the user's specific interest with the same SPECTER model, loads the saved FAISS index, and returns ranked papers by cosine similarity.
-
-The default embedding model is the open-source `sentence-transformers/allenai-specter`, which is designed for scientific paper title + abstract embeddings and runs on CPU.
-
-SPECTER generates normalized embeddings; FAISS only stores and searches those vectors.
-
-Build the past-24-hour index:
-
-```bash
-python embedding.py --build-index
-```
-
-Search top 10:
-
-```bash
-python embedding.py \
-  --interest "single-cell genomics for early cancer biomarker discovery" \
-  --limit 10
-```
-
-Search all indexed papers in ranked order:
-
-```bash
-python embedding.py \
-  --interest "single-cell genomics for early cancer biomarker discovery"
-```
-
-Build then search in one run:
-
-```bash
-python embedding.py \
-  --build-index \
-  --interest "single-cell genomics for early cancer biomarker discovery" \
-  --limit 10
-```
-
-Build an index from an existing local PubMed SQLite database without fetching PubMed:
-
-```bash
-python embedding.py --build-from-existing-db pubmed.sqlite
-```
-
-Custom artifact paths:
-
-```bash
-python embedding.py \
-  --build-index \
-  --index-path indexes/pubmed_24h_specter.faiss \
-  --metadata-path indexes/pubmed_24h_metadata.json \
-  --manifest-path indexes/pubmed_24h_manifest.json
-```
-
-By default the build query is `all[sb] AND hasabstract`. To fetch all PubMed records and skip records without usable text during indexing:
-
-```bash
-python embedding.py --build-index --no-require-abstract
-```
-
-Use `--refresh` to replace existing rows for PMIDs fetched in the current run before inserting the newly fetched records.
-
-## How `base.py` is structured
-
-The script is still a single-file tool, but it already has a clear internal split by responsibility.
-
-- configuration helpers:
-  `get_ncbi_config()`, `load_dotenv()`, and `configure_entrez()` load `.env`, read NCBI-related environment variables, and configure Biopython Entrez
-- database helpers:
-  `init_db()`, `existing_pmids()`, and `insert_articles()` create the SQLite schema, check which PMIDs are already present, and insert only new records
-- XML parsing:
-  `parse_pubmed_record_xml()` extracts the normalized record fields from a single PubMed XML element
-- XML stream handling:
-  `iter_pubmed_records_from_handle()` and `parse_pubmed_records_from_handle()` parse PubMed XML streams into Python dictionaries while tolerating partial parsing failures
-- optional EDirect integration:
-  `EDirectStream`, `parse_edirect_prefix()`, and `edirect_available()` support an alternate retrieval path using external `esearch` and `efetch` commands
-- Biopython PubMed retrieval:
-  `esearch_last_24h()`, `esearch_ids()`, `efetch_pubmed_batch()`, and `efetch_pubmed_by_ids()` handle Entrez search/fetch calls and retry behavior
-- command-line orchestration:
-  `main()` wires together argument parsing, retrieval mode selection, pagination, deduplication, insertion, progress reporting, and resume support
-
-Functionally, a normal run does this:
-
-1. Load configuration from environment variables and an optional `.env` file.
-2. Open or create the SQLite database.
-3. Query PubMed for the last 24 hours of matching records.
-4. Fetch PubMed XML in batches.
-5. Parse each record into normalized Python fields.
-6. Check which PMIDs are already in the database.
-7. Insert only new records.
-8. Print progress and a final summary.
-
-The main persisted schema is a single `pubmed_articles` table with:
-
-- `pmid`
-- `title`
-- `journal`
-- `pub_date`
-- `doi`
-- `authors`
-- `abstract`
-- `fetched_at`
-- `raw_json`
-
-That means the script is currently optimized for a simple append-and-deduplicate workflow rather than a richer relational data model.
-
-## Obvious next features
-
-These are the most immediate additions that would fit the current codebase without a redesign:
-
-- add a `README` example for common queries:
-  for example broad ingest, topic-specific ingest, and small test runs with `--max`
-- add export commands:
-  support writing records to CSV or JSON in addition to SQLite
-- add a date-range option:
-  replace the fixed last-24-hours behavior with explicit start/end or `--days N`
-- add update behavior:
-  right now inserts are `INSERT OR IGNORE`; a new mode could refresh existing rows if PubMed metadata changed
-- add more parsed fields:
-  affiliations, MeSH terms, keywords, publication types, language, or PMID status are obvious candidates
-- add better operational logging:
-  write progress and failures to a log file instead of only stdout/stderr
-- add schema/version metadata:
-  record when the database was created and what script/schema version produced it
-- add a query or report utility:
-  a second script could inspect the SQLite DB and summarize counts by day, journal, or keyword
-- add tests beyond smoke coverage:
-  especially for XML edge cases, EDirect mode behavior, and database insertion logic
-- add a lock or single-run guard:
-  useful if collaborators might accidentally run multiple ingests against the same SQLite file
-- add packaged CLI entrypoints:
-  move from a single script toward a small installable package with clearer commands
-
-If the goal stays "small and portable", the best immediate feature work is probably:
-
-- better tests
-- explicit date-range control
-- export to CSV/JSON
-- optional update/upsert behavior for existing PMIDs
-
-## Repository layout
-
-Top-level files and directories:
-
-- `base.py`: main PubMed ingestion script
-- `embedding.py`: PubMed ingestion plus SPECTER/FAISS recommendation workflow
-- `psyarxiv.py`: PsyArXiv wrapper around the shared OSF preprints ingestion logic
-- `socarxiv.py`: SocArXiv wrapper around the shared OSF preprints ingestion logic
-- `osf_preprints.py`: shared OSF API v2, normalization, date filtering, and SQLite helper functions
-- `openreview.py`: OpenReview venue submission ingestion script
-- `tests/test_base_smoke.py`: small smoke tests for XML parsing behavior
-- `requirements.txt`: Python package requirements for running the script without a repo-local virtualenv
-- `Dockerfile`: Linux Docker image definition for portable containerized execution
-- `Apptainer.def`: Apptainer/Singularity recipe for Linux and HPC environments
-- `.dockerignore`: excludes local artifacts from Docker build context
-- `.env`: optional local environment file read by `base.py` if present
-- `base.sqlite`, `new.db`: existing SQLite database artifacts in this working tree
-- `stuff.md`: auxiliary notes/documentation not required to run the script
-
-Generated or local-only artifacts you may also see:
-
-- `__pycache__/`: Python bytecode cache
-- test caches or temporary files created locally
-
-## Requirements
-
-This repo no longer depends on a checked-in virtualenv. The runtime dependencies are declared in `requirements.txt`.
-
-Current Python dependencies:
-
-- `biopython`
-- `requests`
-- `openreview-py`
-- `faiss-cpu`
-- `numpy`
-- `sentence-transformers`
-
-System/runtime assumptions:
-
-- Python 3.12 or compatible recent Python 3
-- network access to NCBI if you are actually fetching PubMed data
-- network access to OSF if you are fetching PsyArXiv or SocArXiv data
-- network access to OpenReview if you are fetching OpenReview venue submissions
-- a writable path for the SQLite database file
-
-Optional environment variables:
-
-- `NCBI_EMAIL`: email sent to NCBI via Entrez
-- `NCBI_TOOL`: tool name sent to NCBI
-- `NCBI_API_KEY`: optional NCBI API key for higher rate limits
-- `EDIRECT_PREFIX`: optional command prefix if using EDirect through something like WSL
-
-## Running the project
-
-What collaborators can do now:
-
-- plain Python:
-  `python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
-- Docker:
-  `docker build -t infogather .`
-- Apptainer:
-  `apptainer build infogather.sif Apptainer.def`
-
-### Plain Python
-
-Create your own environment and install dependencies:
+Use a recent Python 3 release. The container definitions currently use Python 3.12.
 
 ```bash
 python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-python base.py --db pubmed.sqlite
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-For semantic recommendations:
+For PubMed, set an identifying email before fetching:
 
 ```bash
-python embedding.py --build-index
-python embedding.py --build-from-existing-db pubmed.sqlite
-python embedding.py --interest "single-cell genomics for early cancer biomarker discovery" --limit 10
+export NCBI_EMAIL="you@example.com"
+export NCBI_TOOL="scicomm-embedding"
+# export NCBI_API_KEY="..."  
 ```
 
-For OSF-hosted preprints:
+The first embedding run downloads `sentence-transformers/allenai-specter` from Hugging Face.
+
+## Daily paper pipeline
+
+`pipeline.py` is the primary orchestration entrypoint:
+
+```bash
+python pipeline.py
+```
+
+It performs five stages:
+
+1. Deletes the selected daily source databases and their SQLite sidecars.
+2. Runs each source collector.
+3. Validates SQLite integrity, schema, and row counts.
+4. Merges successful sources and builds SPECTER/FAISS and FTS5 indexes.
+5. Writes a text log and JSON report under `logs/`.
+
+> **Important:** this is a fresh daily rebuild. Before fetching, it deletes the selected `arxiv.sqlite`, `pubmed.sqlite`, `biorxiv.sqlite`, `medrxiv.sqlite`, `psyarxiv.sqlite`, and `socarxiv.sqlite` files. Use `--dry-run` first if you need to inspect the operations.
+
+Preview a run without deleting files or starting subprocesses:
+
+```bash
+python pipeline.py --dry-run
+```
+
+Run only selected sources:
+
+```bash
+python pipeline.py --sources arxiv pubmed medrxiv
+```
+
+Fetch and validate without rebuilding combined search artifacts:
+
+```bash
+python pipeline.py --skip-index
+```
+
+Stop at the first fetch or validation failure:
+
+```bash
+python pipeline.py --fail-fast
+```
+
+OpenReview/bluesky/mastodon is intentionally excluded from `pipeline.py`.
+
+### Pipeline outputs
+
+The combined paper build produces:
+
+| File | Purpose |
+| --- | --- |
+| `all.sqlite` | Normalized `papers` table plus the `papers_fts` FTS5 index |
+| `all_specter.index` | FAISS `IndexFlatIP` over normalized SPECTER vectors |
+| `all_metadata.json` | Metadata aligned by position with the FAISS vectors |
+| `all_manifest.json` | Inputs, source counts, model, dimensions, skipped rows, and timings |
+| `logs/pipeline_<timestamp>.log` | Full console log |
+| `logs/pipeline_report_<timestamp>.json` | Machine-readable source and build report |
+
+Papers without enough usable title/abstract text remain in `all.sqlite` but are skipped by the FAISS and FTS5 indexes.
+
+## Build and search indexes directly
+
+`All_embedding.py` is the merge, indexing, and retrieval tool.
+
+### Build one database
+
+Pass a supported SQLite database as the positional argument:
+
+```bash
+python All_embedding.py arxiv.sqlite
+```
+
+Artifact names are derived from the database stem:
+
+```text
+arxiv_specter.index
+arxiv_metadata.json
+arxiv_manifest.json
+```
+
+Supported input schemas are produced by PubMed, arXiv, bioRxiv, medRxiv, RSS, PsyArXiv/SocArXiv, OpenReview, and previously merged `papers` databases.
+
+An existing database can also be indexed with explicit artifact paths:
+
+```bash
+python All_embedding.py \
+  --build-from-existing-db arxiv.sqlite \
+  --index-path arxiv_specter.index \
+  --metadata-path arxiv_metadata.json \
+  --manifest-path arxiv_manifest.json
+```
+
+### Merge local databases
+
+Run this in a directory containing the source `.sqlite` files:
+
+```bash
+python All_embedding.py all.sqlite
+```
+
+This discovers supported SQLite databases in the current directory, normalizes them into `all.sqlite`, deduplicates by `(source, external_id)`, builds `papers_fts`, and writes the combined FAISS/metadata/manifest artifacts.
+
+Unlike `pipeline.py`, a direct `all.sqlite` merge includes any supported database it discovers, including an `openreview.sqlite` file. Temporary, backup, cache, test, and existing `all.sqlite` files are ignored.
+
+### Search
+
+Stage-two search currently requires exactly one artifact selector: `--all` or `--arxiv`.
+
+Semantic search:
+
+```bash
+python All_embedding.py \
+  --interest "mechanistic interpretability for language models" \
+  --all \
+  --limit 10
+```
+
+Keyword search through SQLite FTS5:
+
+```bash
+python All_embedding.py \
+  --interest "Monte Carlo tree search" \
+  --all \
+  --search-mode keyword \
+  --limit 10
+```
+
+Hybrid search combines semantic and keyword candidate pools with reciprocal rank fusion:
+
+```bash
+python All_embedding.py \
+  --interest "Monte Carlo tree search" \
+  --all \
+  --search-mode hybrid \
+  --pool-size 100 \
+  --rrf-k 60 \
+  --keyword-reserved 3 \
+  --limit 10
+```
+
+Useful search options:
+
+- `--min-score`: semantic-score cutoff.
+- `--pool-size`: candidates retrieved from each hybrid pool.
+- `--rrf-k`: reciprocal-rank-fusion smoothing constant.
+- `--keyword-reserved`: exact-title keyword matches reserved in hybrid output; use `0` for pure RRF.
+- `--index-path`, `--metadata-path`, and `--manifest-path`: override artifact locations.
+
+Only `--all` and `--arxiv` are exposed as built-in search selectors. Semantic artifact paths can be overridden explicitly, but keyword search still reads `all.sqlite` or `arxiv.sqlite`; fully supporting another source as a search target requires a code change.
+
+### Fetch and index PubMed in one command
+
+`All_embedding.py` can also fetch the latest PubMed window and build an index:
+
+```bash
+python All_embedding.py --build-index
+```
+
+By default it uses `all[sb] AND hasabstract`, `datetype=edat`, and `reldate=1`.
+
+```bash
+python All_embedding.py --build-index --no-require-abstract
+python All_embedding.py --build-index --refresh
+```
+
+## Standalone paper collectors
+
+All collectors deduplicate on a stable source identifier and preserve normalized fields plus raw source data.
+
+### PubMed
+
+`base.py` fetches records added or updated in the previous Entrez day (`reldate=1`, `datetype=edat`) and writes `pubmed_articles`.
+
+```bash
+python base.py --db pubmed.sqlite
+python base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
+python base.py --db pubmed.sqlite --max 1000 --fetch-batch 100
+python base.py --db pubmed.sqlite --start-from 1000
+```
+
+Biopython Entrez is the default retrieval path. NCBI EDirect is optional:
+
+```bash
+python base.py --db pubmed.sqlite --edirect auto
+python base.py --db pubmed.sqlite --edirect on --edirect-prefix wsl
+```
+
+An optional `.env` file in the working directory may define `NCBI_EMAIL`, `NCBI_TOOL`, `NCBI_API_KEY`, and `EDIRECT_PREFIX`.
+
+### arXiv
+
+With no query, `arxiv.py` uses OAI-PMH for bulk/incremental metadata and locally filters the day-level datestamps. Supplying `--query` switches to the arXiv Atom API.
+
+```bash
+python arxiv.py --db arxiv.sqlite
+python arxiv.py --db arxiv.sqlite --oai-set "cs:cs:AI"
+python arxiv.py --db arxiv.sqlite --query "cat:cs.CL" --max 500
+```
+
+Rows are stored in `arxiv_articles` and deduplicated by canonical arXiv ID.
+
+### bioRxiv and medRxiv
+
+```bash
+python biorxiv.py --db biorxiv.sqlite --server biorxiv
+python medrxiv.py --db medrxiv.sqlite
+python medrxiv.py --db medrxiv.sqlite --days 7
+python medrxiv.py --db medrxiv.sqlite \
+  --start-date 2026-06-01 \
+  --end-date 2026-06-07
+```
+
+`biorxiv.py` can query either server, while `medrxiv.py` provides a dedicated medRxiv schema and explicit date-range controls.
+
+### PsyArXiv and SocArXiv
+
+These wrappers share the OSF API and normalization logic in `osf_preprints.py`.
 
 ```bash
 python psyarxiv.py --db psyarxiv.sqlite
 python socarxiv.py --db socarxiv.sqlite
-python psyarxiv.py --db psyarxiv.sqlite --query "cognitive bias" --max-results 500
-python socarxiv.py --db socarxiv.sqlite --query "social inequality" --max-results 500
+python psyarxiv.py --hours 72 --query "cognitive bias" --max-results 500
+python socarxiv.py --dry-run
 ```
 
-For OpenReview venue submissions:
+Both write a unified `papers` table keyed by `(source, external_id)`.
+
+### OpenReview
+
+OpenReview collection is venue-based rather than a global recent-paper feed:
 
 ```bash
 python openreview.py "ICLR.cc/2026/Conference"
-python openreview.py "ICLR.cc/2026/Conference" --invitation "ICLR.cc/2026/Conference/-/Blind_Submission"
+python openreview.py \
+  "ICLR.cc/2026/Conference" \
+  --invitation "ICLR.cc/2026/Conference/-/Blind_Submission"
 ```
 
-The first embedding run may download the model from Hugging Face, so it needs internet access.
+The script discovers or accepts a submission invitation, fetches publicly visible notes, classifies their visible status, and writes `openreview.sqlite`. Private submissions and non-public rejected papers are not accessible without the relevant permissions.
 
-### Docker
+## RSS and journal feed tools
 
-Docker packages the project dependencies into a reproducible local container. It is useful when you do not want to manage a Python virtualenv directly.
+See [`README_rss.md`](README_rss.md) for the `rss.py` schema and detailed behavior.
+
+Ingest a known feed:
 
 ```bash
-docker build -t infogather .
-docker run --rm -v "$PWD:/work" -w /work infogather --build-index \
-  --db /work/pubmed.sqlite \
-  --index-path /work/paper_specter.index \
-  --metadata-path /work/paper_metadata.json \
-  --manifest-path /work/paper_index_manifest.json
-
-docker run --rm -v "$PWD:/work" -w /work infogather \
-  --build-from-existing-db /work/pubmed.sqlite \
-  --index-path /work/paper_specter.index \
-  --metadata-path /work/paper_metadata.json \
-  --manifest-path /work/paper_index_manifest.json
-
-docker run --rm -v "$PWD:/work" -w /work infogather \
-  --interest "single-cell genomics for early cancer biomarker discovery" \
-  --limit 10 \
-  --index-path /work/paper_specter.index \
-  --metadata-path /work/paper_metadata.json \
-  --manifest-path /work/paper_index_manifest.json
+python rss.py \
+  --source nature \
+  --feed-url "https://www.nature.com/nature.rss"
 ```
 
-This mounts the host repo at `/work`, so SQLite, FAISS, metadata, and manifest artifacts persist on the host. The first SPECTER run downloads the model inside the container unless you mount a Hugging Face cache.
+The source slug determines the output name, such as `nature.sqlite`. By default, entries from the last 24 hours are retained; undated entries are kept with a warning.
 
-To run the lower-level ingestion script inside the same image:
+Discover a journal through Crossref, homepage autodiscovery, and candidate feed validation:
 
 ```bash
-docker run --rm -v "$PWD:/work" -w /work --entrypoint python infogather /app/base.py --db /work/pubmed.sqlite
+python rss_discover_journal.py --journal "Nature"
+python rss_discover_journal.py --journal "Nature" --mailto "you@example.com"
 ```
 
-### Apptainer
+Feed-list utilities:
 
-Apptainer, also known as Singularity, is the container format commonly used on HPC clusters where Docker is not allowed for normal users.
+- `check_rss_feeds.py` validates `rss_feeds_raw.json` and writes checked, summary, and blocked-feed JSON files.
+- `scrape_feedspot_science.py` discovers and checks feeds from Feedspot's public science list.
+- `scrape_aps_feeds.py` parses a local `aps_feeds.html` snapshot and checks discovered APS feeds.
+- `scrape_oup_rss.py` parses a local `oup_rss.html` snapshot and checks OUP feeds; `OUP_COOKIE` can be set when a browser-derived cookie is needed.
+
+The feed-checking scripts currently define active feeds as those with a latest item dated in 2025 or 2026.
+
+## Bluesky and Mastodon collectors
+
+These tools use a deliberately unusual positional syntax:
 
 ```bash
-apptainer build infogather.sif Apptainer.def
-apptainer run infogather.sif --build-index
-apptainer run infogather.sif --interest "single-cell genomics for early cancer biomarker discovery" --limit 10
+python bluesky.py - scientist - "Nicole Rust" - days 30
+python bluesky.py - journal - "Nature" - days 7 --journal-mode account
+
+python mastodon.py - scientist - "Terence Tao" - days 10 \
+  --account @tao@mathstodon.xyz
+python mastodon.py - journal - "Nature" - days 7 --journal-mode auto
 ```
 
-To run the lower-level ingestion script:
+Both write `<safe_query>.sqlite` and `<safe_query>.json` in the current directory or `--out-dir`.
+
+Bluesky uses the public API. Scientist mode selects an actor account; journal mode can use an official-looking account or explicit keyword search. Public post search may be authentication-limited.
+
+Mastodon searches the instances listed in `mastodon_instances.json`. A direct `--account @user@instance` is the most reliable scientist lookup. Keyword coverage is instance-dependent and is not a complete search of the Fediverse.
+
+## Data model
+
+Source databases retain source-specific schemas. During a combined build, `All_embedding.py` maps them into one `papers` table with:
+
+- stable identity: `paper_key`, `source`, `external_id`
+- bibliographic metadata: title, abstract, authors, dates, DOI, journal, categories, URLs
+- source-specific identifiers and fields for PubMed, arXiv, RSS, preprint servers, and OpenReview
+- provenance: `source_db`, `fetched_at`, and raw JSON/content
+
+The combined database also contains `papers_fts`, an FTS5 table over eligible paper text. FAISS uses normalized SPECTER vectors and inner-product search, which corresponds to cosine similarity for normalized vectors.
+
+## Containers
+
+The Docker and Apptainer definitions install the Python dependencies and use `All_embedding.py` as the default entrypoint.
 
 ```bash
-apptainer exec infogather.sif python /opt/infogather/base.py --db ./pubmed.sqlite
+docker build -t scicomm-embedding .
+docker run --rm -v "$PWD:/work" -w /work scicomm-embedding all.sqlite
+docker run --rm -v "$PWD:/work" -w /work scicomm-embedding \
+  --interest "single-cell cancer biomarkers" --all --limit 10
 ```
-
-## Testing
-
-Run the smoke tests with:
 
 ```bash
-python -m unittest -v tests/test_base_smoke.py
+apptainer build scicomm-embedding.sif Apptainer.def
+apptainer run scicomm-embedding.sif all.sqlite
+apptainer run scicomm-embedding.sif \
+  --interest "single-cell cancer biomarkers" --all --limit 10
 ```
 
-## Notes
+The current images copy `All_embedding.py`, `base.py`, `arxiv.py`, `biorxiv.py`, and `medrxiv.py`. They do not include `pipeline.py`, the OSF/OpenReview/RSS/social scripts, or local source databases unless those files are mounted at runtime.
 
-- EDirect is optional. The default code path uses Biopython and works without installing EDirect.
-- EDirect is not bundled in this repo.
-- The last-24-hours query can return a large number of records, so using `--max` is useful for smaller test runs.
-- `embedding.py` intentionally uses a broad PubMed keyword/query search first, then semantic embedding similarity for the final ranking. PubMed itself is not used as a semantic search engine.
-- The SQLite database is part of the workflow output, not a required source file.
+## Repository map
+
+| Path | Role |
+| --- | --- |
+| `pipeline.py` | Fresh daily fetch, validation, merge, index, and reporting workflow |
+| `All_embedding.py` | Schema detection, normalization, merge, FTS5, SPECTER/FAISS, and search |
+| `base.py` | PubMed ingestion |
+| `arxiv.py` | arXiv OAI-PMH/Atom ingestion |
+| `biorxiv.py` | bioRxiv or medRxiv details-API ingestion |
+| `medrxiv.py` | Dedicated medRxiv ingestion with date controls |
+| `osf_preprints.py` | Shared PsyArXiv/SocArXiv API and SQLite helpers |
+| `psyarxiv.py`, `socarxiv.py` | OSF provider wrappers |
+| `openreview.py` | Public OpenReview venue ingestion |
+| `rss.py` | Known RSS/Atom feed ingestion |
+| `rss_discover_journal.py` | Journal lookup, feed discovery, validation, and ingestion |
+| `check_rss_feeds.py` | Bulk feed validation |
+| `scrape_*.py` | Feed discovery/checking utilities |
+| `bluesky.py`, `mastodon.py` | Scientist/journal social-post collection |
+| `Dockerfile`, `Apptainer.def` | Container builds centered on `All_embedding.py` |
+
+SQLite databases, FAISS indexes, metadata/manifest JSON, social exports, bytecode caches, and pipeline logs are generated workflow outputs. They can be large and are not required to understand or modify the source.
+
+## Operational notes
+
+- All network collectors depend on the availability and rate limits of upstream services.
+- A first SPECTER run requires internet access and can take substantial time on CPU.
+- SQLite collectors generally use WAL mode, so `-wal` and `-shm` files may appear while databases are open.
+- There is currently no automated test suite in the repository. Use CLI `--help`, `python -m compileall`, small capped fetches, and `pipeline.py --dry-run` for local validation.
+- No license file is currently included.
