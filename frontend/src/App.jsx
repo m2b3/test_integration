@@ -79,10 +79,7 @@ function App() {
       match_mode: nextProfile.match_mode,
     }
 
-    await updateUserTags(profileWithTags.user_id, {
-      tags: nextProfile.tags,
-      match_mode: nextProfile.match_mode,
-    })
+    await updateUserTags(profileWithTags.user_id, nextProfile.tags, nextProfile.match_mode)
 
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileWithTags))
     setProfile(profileWithTags)

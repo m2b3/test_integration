@@ -38,3 +38,7 @@ export async function getUserFeed(userId, filters = {}) {
 export async function getTags() {
   return requestJson('/tags')
 }
+
+export async function getArticleSources() {
+  return requestJson('/sources')
+}

@@ -24,7 +24,9 @@ app.add_middleware(
         "http://localhost:5174",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
-        "http://134.87.8.193:5173", # server access
+        "http://134.87.8.193",
+        "http://134.87.8.193:5173",
+        "http://192.168.167.59",
         "http://192.168.167.59:5173",
     ],
     allow_credentials=True,
@@ -186,6 +188,13 @@ def get_tags(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[dict]
             """
         )
         return list(cur.fetchall())
+
+
+@app.get("/sources")
+def get_sources(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[str]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT source FROM articles ORDER BY source ASC")
+        return [row["source"] for row in cur.fetchall()]
 
 
 @app.get("/articles")
