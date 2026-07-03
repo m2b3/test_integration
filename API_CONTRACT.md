@@ -11,6 +11,8 @@ GET  /sources
 GET  /articles
 GET  /users/{user_id}/feed
 GET  /users/{user_id}/tags
+GET  /users/{user_id}/recently-viewed?limit=20
+POST /users/{user_id}/recently-viewed
 POST /login
 PUT  /users/{user_id}/tags
 ```
@@ -82,12 +84,34 @@ recently_viewed
 ```
 
 Suggested future endpoints:
+Implemented recently viewed:
+
+```text
+GET  /users/{user_id}/recently-viewed?limit=20
+POST /users/{user_id}/recently-viewed
+```
+
+`POST /users/{user_id}/recently-viewed` stores a snapshot so recently viewed still works after old rows are recycled from the rolling article cache:
+
+```json
+{
+  "article_key": "arxiv:2401.12345",
+  "source": "arxiv",
+  "external_id": "2401.12345",
+  "title": "Example paper",
+  "authors": "A. Smith, B. Lee",
+  "url": "https://arxiv.org/abs/2401.12345",
+  "published_date": "2026-07-03",
+  "abstract": "...",
+  "tags": ["biology", "machine learning"]
+}
+```
+
+Likely future endpoints:
 
 ```text
 GET  /users/{user_id}/profile
 PUT  /users/{user_id}/profile
-GET  /users/{user_id}/recently-viewed
-POST /users/{user_id}/recently-viewed
 GET  /users/{user_id}/saved-articles
 POST /users/{user_id}/saved-articles
 DELETE /users/{user_id}/saved-articles/{article_id}

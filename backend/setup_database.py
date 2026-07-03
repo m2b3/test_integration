@@ -147,6 +147,7 @@ USER_DAILY_FEED = [
 
 
 DROP_TABLES_SQL = """
+DROP TABLE IF EXISTS user_recently_viewed;
 DROP TABLE IF EXISTS user_daily_feed;
 DROP TABLE IF EXISTS article_tags;
 DROP TABLE IF EXISTS user_tags;
@@ -196,11 +197,27 @@ CREATE TABLE user_daily_feed (
     PRIMARY KEY (user_id, article_id, feed_date)
 );
 
+CREATE TABLE user_recently_viewed (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    article_key TEXT NOT NULL,
+    source TEXT NOT NULL,
+    external_id TEXT,
+    title TEXT NOT NULL,
+    authors TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '',
+    published_date TEXT,
+    abstract TEXT NOT NULL DEFAULT '',
+    tags TEXT[] NOT NULL DEFAULT '{}',
+    viewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, article_key)
+);
+
 CREATE INDEX idx_user_tags_tag_id ON user_tags(tag_id);
 CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id);
 CREATE INDEX idx_articles_published_date ON articles(published_date);
 CREATE INDEX idx_articles_source ON articles(source);
 CREATE INDEX idx_user_daily_feed_date ON user_daily_feed(feed_date);
+CREATE INDEX idx_user_recently_viewed_viewed_at ON user_recently_viewed(user_id, viewed_at DESC);
 """
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
-import { login, updateUserTags } from './api/users'
+import { addRecentlyViewed, getRecentlyViewed, login, updateUserTags } from './api/users'
 import ArticleCard from './components/ArticleCard'
 import ManageInterestsPage from './components/ManageInterestsPage'
 import ProfileModal from './components/ProfileModal'
@@ -10,7 +10,6 @@ import SearchBar from './components/SearchBar'
 import './App.css'
 
 const PROFILE_STORAGE_KEY = 'scicommons.profile'
-const RECENTLY_VIEWED_STORAGE_KEY = 'scicommons.recentlyViewed'
 
 function readStoredProfile() {
   try {
@@ -21,18 +20,9 @@ function readStoredProfile() {
   }
 }
 
-function readRecentlyViewed() {
-  try {
-    const value = window.localStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY)
-    return value ? JSON.parse(value) : []
-  } catch {
-    return []
-  }
-}
-
 function App() {
   const [articles, setArticles] = useState([])
-  const [recentlyViewed, setRecentlyViewed] = useState(() => readRecentlyViewed())
+  const [recentlyViewed, setRecentlyViewed] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
@@ -120,15 +110,25 @@ function App() {
     setActivePage('profile')
   }
 
-  function handleArticleViewed(article) {
-    const articleKey = article.paper_key || article.id
-    const nextRecentlyViewed = [
-      article,
-      ...recentlyViewed.filter((item) => (item.paper_key || item.id) !== articleKey),
-    ].slice(0, 20)
-
+  async function handleRecentlyViewedPage() {
+    if (!profile) {
+      setIsProfileOpen(true)
+      return
+    }
+    const nextRecentlyViewed = await getRecentlyViewed(profile.user_id, 20)
     setRecentlyViewed(nextRecentlyViewed)
-    window.localStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(nextRecentlyViewed))
+    setActivePage('recently-viewed')
+  }
+
+  async function handleArticleViewed(article) {
+    if (!profile) {
+      return
+    }
+    const viewedArticle = await addRecentlyViewed(profile.user_id, article)
+    setRecentlyViewed((currentArticles) => [
+      viewedArticle,
+      ...currentArticles.filter((item) => (item.paper_key || item.id) !== viewedArticle.paper_key),
+    ].slice(0, 20))
   }
 
   function renderContent() {
@@ -137,7 +137,7 @@ function App() {
         <ProfilePage
           onBack={() => setActivePage('feed')}
           onManageInterests={() => setActivePage('manage-interests')}
-          onRecentlyViewed={() => setActivePage('recently-viewed')}
+          onRecentlyViewed={handleRecentlyViewedPage}
           profile={profile}
         />
       )
@@ -204,7 +204,7 @@ function App() {
             <ArticleCard
               key={article.paper_key}
               article={article}
-              onView={handleArticleViewed}
+              onView={profile ? handleArticleViewed : undefined}
             />
           ))}
 

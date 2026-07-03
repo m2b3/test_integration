@@ -173,6 +173,8 @@ GET  /articles
 GET  /articles?tags=biology,chemistry&match=or
 GET  /users/{user_id}/feed
 GET  /users/{user_id}/tags
+GET  /users/{user_id}/recently-viewed
+POST /users/{user_id}/recently-viewed
 POST /login
 PUT  /users/{user_id}/tags
 ```

@@ -45,6 +45,19 @@ class TagsUpdateRequest(BaseModel):
     match_mode: MatchMode = "or"
 
 
+class RecentlyViewedRequest(BaseModel):
+    article_key: str | None = None
+    id: str | None = None
+    source: str
+    external_id: str | None = None
+    title: str
+    authors: str = ""
+    url: str = ""
+    published_date: str | None = None
+    abstract: str = ""
+    tags: list[str] = []
+
+
 def database_url() -> str:
     return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
@@ -68,6 +81,24 @@ def normalize_article(row: dict) -> dict:
         if hasattr(row["published_date"], "isoformat")
         else row["published_date"],
         "tags": row["tags"] or [],
+    }
+
+
+def normalize_recently_viewed(row: dict) -> dict:
+    return {
+        "id": row["article_key"],
+        "paper_key": row["article_key"],
+        "source": row["source"],
+        "external_id": row["external_id"],
+        "title": row["title"],
+        "authors": row["authors"],
+        "url": row["url"],
+        "published_date": row["published_date"],
+        "abstract": row["abstract"],
+        "tags": row["tags"] or [],
+        "viewed_at": row["viewed_at"].isoformat()
+        if hasattr(row["viewed_at"], "isoformat")
+        else row["viewed_at"],
     }
 
 
@@ -341,3 +372,109 @@ def update_user_tags(
         "tags": unique_tags,
         "match_mode": payload.match_mode,
     }
+
+
+@app.get("/users/{user_id}/recently-viewed")
+def get_recently_viewed(
+    user_id: str,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        cur.execute(
+            """
+            SELECT
+                article_key,
+                source,
+                external_id,
+                title,
+                authors,
+                url,
+                published_date,
+                abstract,
+                tags,
+                viewed_at
+            FROM user_recently_viewed
+            WHERE user_id = %s
+            ORDER BY viewed_at DESC
+            LIMIT %s
+            """,
+            [user_id, limit],
+        )
+        return [normalize_recently_viewed(row) for row in cur.fetchall()]
+
+
+@app.post("/users/{user_id}/recently-viewed")
+def add_recently_viewed(
+    user_id: str,
+    payload: RecentlyViewedRequest,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
+    article_key = (payload.article_key or payload.id or "").strip()
+    if not article_key:
+        raise HTTPException(status_code=400, detail="article_key or id is required")
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        cur.execute(
+            """
+            INSERT INTO user_recently_viewed (
+                user_id,
+                article_key,
+                source,
+                external_id,
+                title,
+                authors,
+                url,
+                published_date,
+                abstract,
+                tags,
+                viewed_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (user_id, article_key)
+            DO UPDATE SET
+                source = EXCLUDED.source,
+                external_id = EXCLUDED.external_id,
+                title = EXCLUDED.title,
+                authors = EXCLUDED.authors,
+                url = EXCLUDED.url,
+                published_date = EXCLUDED.published_date,
+                abstract = EXCLUDED.abstract,
+                tags = EXCLUDED.tags,
+                viewed_at = now()
+            RETURNING
+                article_key,
+                source,
+                external_id,
+                title,
+                authors,
+                url,
+                published_date,
+                abstract,
+                tags,
+                viewed_at
+            """,
+            [
+                user_id,
+                article_key,
+                payload.source,
+                payload.external_id,
+                payload.title,
+                payload.authors,
+                payload.url,
+                payload.published_date,
+                payload.abstract,
+                payload.tags,
+            ],
+        )
+        row = cur.fetchone()
+
+    return normalize_recently_viewed(row)

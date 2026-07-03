@@ -20,3 +20,25 @@ export async function updateUserTags(userId, tags, matchMode = 'or') {
     }),
   })
 }
+
+export async function getRecentlyViewed(userId, limit = 20) {
+  return requestJson(`/users/${userId}/recently-viewed?limit=${limit}`)
+}
+
+export async function addRecentlyViewed(userId, article) {
+  return requestJson(`/users/${userId}/recently-viewed`, {
+    method: 'POST',
+    body: JSON.stringify({
+      article_key: article.paper_key || article.id,
+      id: article.id,
+      source: article.source,
+      external_id: article.external_id || article.id,
+      title: article.title,
+      authors: Array.isArray(article.authors) ? article.authors.join(', ') : article.authors || '',
+      url: article.url || '',
+      published_date: article.published_date || '',
+      abstract: article.abstract || '',
+      tags: article.tags || [],
+    }),
+  })
+}
