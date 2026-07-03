@@ -1,19 +1,12 @@
 import { useState } from 'react'
+import InterestInput from './InterestInput'
 
-function ProfileModal({ allTags, initialProfile, onClose, onSave }) {
+function ProfileModal({ initialProfile, onClose, onSave }) {
   const [step, setStep] = useState(initialProfile ? 'interests' : 'account')
   const [username, setUsername] = useState(initialProfile?.username || '')
   const [email, setEmail] = useState(initialProfile?.email || '')
   const [tags, setTags] = useState(initialProfile?.tags || [])
   const [authors, setAuthors] = useState(initialProfile?.authors || '')
-
-  function toggleTag(tag) {
-    setTags((currentTags) =>
-      currentTags.includes(tag)
-        ? currentTags.filter((currentTag) => currentTag !== tag)
-        : [...currentTags, tag],
-    )
-  }
 
   function handleAccountSubmit(event) {
     event.preventDefault()
@@ -77,21 +70,7 @@ function ProfileModal({ allTags, initialProfile, onClose, onSave }) {
           </form>
         ) : (
           <form onSubmit={handleInterestSubmit}>
-            <div className="interest-section">
-              <span>Fields of interest</span>
-              <div className="profile-tags" aria-label="Interest fields">
-                {allTags.map((tag) => (
-                  <button
-                    className={tags.includes(tag) ? 'is-selected' : ''}
-                    key={tag}
-                    type="button"
-                    onClick={() => toggleTag(tag)}
-                  >
-                    {tag}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <InterestInput interests={tags} onChange={setTags} />
 
             <label className="field optional-field">
               <span>Authors to follow optional</span>

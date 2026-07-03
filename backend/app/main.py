@@ -305,7 +305,11 @@ def update_user_tags(
     payload: TagsUpdateRequest,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
-    unique_tags = list(dict.fromkeys(payload.tags))
+    unique_tags = [
+        tag
+        for tag in dict.fromkeys(tag.strip() for tag in payload.tags)
+        if tag
+    ]
 
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
@@ -313,14 +317,14 @@ def update_user_tags(
             raise HTTPException(status_code=404, detail="User not found")
 
         if unique_tags:
-            cur.execute("SELECT id FROM tags WHERE id = ANY(%s)", [unique_tags])
-            valid_tags = {row["id"] for row in cur.fetchall()}
-            missing_tags = [tag for tag in unique_tags if tag not in valid_tags]
-            if missing_tags:
-                raise HTTPException(
-                    status_code=400,
-                    detail={"message": "Unknown tag IDs", "tags": missing_tags},
-                )
+            cur.executemany(
+                """
+                INSERT INTO tags (id, name)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+                """,
+                [(tag, tag) for tag in unique_tags],
+            )
 
         cur.execute("DELETE FROM user_tags WHERE user_id = %s", [user_id])
         if unique_tags:

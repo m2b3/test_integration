@@ -70,7 +70,7 @@ PUT /users/{user_id}/tags
 Current required preference:
 
 ```text
-fields of interest
+fields of interest as free-form strings
 ```
 
 Likely future preferences:

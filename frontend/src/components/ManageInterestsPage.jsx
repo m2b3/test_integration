@@ -1,16 +1,9 @@
 import { useState } from 'react'
+import InterestInput from './InterestInput'
 
-function ManageInterestsPage({ allTags, onBack, onSave, profile }) {
+function ManageInterestsPage({ onBack, onSave, profile }) {
   const [tags, setTags] = useState(profile?.tags || [])
   const [authors, setAuthors] = useState(profile?.authors || '')
-
-  function toggleTag(tag) {
-    setTags((currentTags) =>
-      currentTags.includes(tag)
-        ? currentTags.filter((currentTag) => currentTag !== tag)
-        : [...currentTags, tag],
-    )
-  }
 
   function handleSubmit(event) {
     event.preventDefault()
@@ -32,21 +25,7 @@ function ManageInterestsPage({ allTags, onBack, onSave, profile }) {
       </div>
 
       <form className="interests-form" onSubmit={handleSubmit}>
-        <div className="interest-section">
-          <span>Fields of interest</span>
-          <div className="profile-tags" aria-label="Interest fields">
-            {allTags.map((tag) => (
-              <button
-                className={tags.includes(tag) ? 'is-selected' : ''}
-                key={tag}
-                type="button"
-                onClick={() => toggleTag(tag)}
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        </div>
+        <InterestInput interests={tags} onChange={setTags} />
 
         <label className="field optional-field">
           <span>Authors to follow optional</span>

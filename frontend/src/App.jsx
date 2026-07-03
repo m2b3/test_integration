@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getArticles, getTags, getUserFeed } from './api/articles'
+import { getArticles, getUserFeed } from './api/articles'
 import { login, updateUserTags } from './api/users'
 import ArticleCard from './components/ArticleCard'
 import ManageInterestsPage from './components/ManageInterestsPage'
@@ -32,7 +32,6 @@ function readRecentlyViewed() {
 
 function App() {
   const [articles, setArticles] = useState([])
-  const [allTags, setAllTags] = useState([])
   const [recentlyViewed, setRecentlyViewed] = useState(() => readRecentlyViewed())
   const [isLoading, setIsLoading] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
@@ -52,23 +51,6 @@ function App() {
         : keywordQuery.trim()
           ? 'keyword'
           : 'none'
-
-  useEffect(() => {
-    let isActive = true
-
-    async function loadOptions() {
-      const nextTags = await getTags()
-      if (isActive) {
-        setAllTags(nextTags.map((tag) => tag.id))
-      }
-    }
-
-    loadOptions()
-
-    return () => {
-      isActive = false
-    }
-  }, [])
 
   useEffect(() => {
     let isActive = true
@@ -173,7 +155,6 @@ function App() {
     if (activePage === 'manage-interests' && profile) {
       return (
         <ManageInterestsPage
-          allTags={allTags}
           onBack={() => setActivePage('profile')}
           onSave={handleInterestSave}
           profile={profile}
@@ -260,7 +241,6 @@ function App() {
 
       {isProfileOpen && (
         <ProfileModal
-          allTags={allTags}
           initialProfile={profile}
           onClose={() => setIsProfileOpen(false)}
           onSave={handleProfileSave}

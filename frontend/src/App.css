@@ -39,10 +39,12 @@
 .secondary-button,
 .text-button,
 .icon-button,
+.interest-chip button,
 .match-control button,
 .selected-tags button,
 .profile-tags button,
 .suggestions button,
+.interest-suggestions button,
 .feed-tabs button,
 .source-control button {
   border: 1px solid transparent;
@@ -532,6 +534,75 @@ select:focus {
 
 .optional-field {
   margin-top: 16px;
+}
+
+.interest-input {
+  display: grid;
+  gap: 8px;
+}
+
+.interest-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.interest-suggestions button {
+  background: var(--surface);
+  border-color: var(--border);
+  border-radius: 999px;
+  color: var(--text-strong);
+  font-size: 13px;
+  min-height: 28px;
+  padding: 5px 10px;
+}
+
+.interest-suggestions button:hover {
+  border-color: var(--accent);
+}
+
+.interest-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 30px;
+}
+
+.interest-chip {
+  align-items: center;
+  background: var(--tag-bg);
+  border: 1px solid var(--tag-border);
+  border-radius: 999px;
+  color: var(--tag-text);
+  display: inline-flex;
+  font-size: 13px;
+  line-height: 1;
+  min-height: 30px;
+  padding: 7px 28px 7px 11px;
+  position: relative;
+}
+
+.interest-chip button {
+  align-items: center;
+  background: var(--surface-strong);
+  border-color: var(--tag-border);
+  border-radius: 50%;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  height: 18px;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+  position: absolute;
+  right: -4px;
+  top: -5px;
+  width: 18px;
+}
+
+.interest-chip button:hover {
+  border-color: var(--accent);
+  color: var(--text-strong);
 }
 
 .profile-tags {
