@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getArticleSources, getArticles, getTags } from './api/articles'
+import { getArticles, getTags, getUserFeed } from './api/articles'
 import { login, updateUserTags } from './api/users'
 import ArticleCard from './components/ArticleCard'
-import FilterBar from './components/FilterBar'
 import ProfileModal from './components/ProfileModal'
+import SearchBar from './components/SearchBar'
 import './App.css'
 
 const PROFILE_STORAGE_KEY = 'scicommons.profile'
@@ -20,23 +20,30 @@ function readStoredProfile() {
 function App() {
   const [articles, setArticles] = useState([])
   const [allTags, setAllTags] = useState([])
-  const [sources, setSources] = useState([])
   const [isLoading, setIsLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [selectedTags, setSelectedTags] = useState(() => readStoredProfile()?.tags || [])
-  const [matchMode, setMatchMode] = useState(() => readStoredProfile()?.match_mode || 'or')
+  const [semanticQuery, setSemanticQuery] = useState('')
+  const [keywordQuery, setKeywordQuery] = useState('')
   const [source, setSource] = useState('all')
   const [profile, setProfile] = useState(() => readStoredProfile())
-  const [isProfileOpen, setIsProfileOpen] = useState(() => !readStoredProfile())
+  const [activeFeed, setActiveFeed] = useState(() => (readStoredProfile() ? 'recommended' : 'all'))
+  const [isProfileOpen, setIsProfileOpen] = useState(false)
+
+  const searchMode =
+    semanticQuery.trim() && keywordQuery.trim()
+      ? 'hybrid'
+      : semanticQuery.trim()
+        ? 'semantic'
+        : keywordQuery.trim()
+          ? 'keyword'
+          : 'none'
 
   useEffect(() => {
     let isActive = true
 
     async function loadOptions() {
-      const [nextTags, nextSources] = await Promise.all([getTags(), getArticleSources()])
+      const nextTags = await getTags()
       if (isActive) {
         setAllTags(nextTags.map((tag) => tag.id))
-        setSources(nextSources)
       }
     }
 
@@ -52,12 +59,17 @@ function App() {
 
     async function loadArticles() {
       setIsLoading(true)
-      const nextArticles = await getArticles({
-        tags: selectedTags,
-        match: matchMode,
+      const filters = {
+        semantic_query: semanticQuery,
+        keyword_query: keywordQuery,
+        search_mode: searchMode,
         source,
-        q: searchTerm,
-      })
+      }
+      const nextArticles =
+        activeFeed === 'recommended' && profile
+          ? await getUserFeed(profile.user_id, filters)
+          : await getArticles(filters)
+
       if (isActive) {
         setArticles(nextArticles)
         setIsLoading(false)
@@ -69,54 +81,78 @@ function App() {
     return () => {
       isActive = false
     }
-  }, [matchMode, searchTerm, selectedTags, source])
+  }, [activeFeed, keywordQuery, profile, searchMode, semanticQuery, source])
 
   async function handleProfileSave(nextProfile) {
     const savedProfile = await login(nextProfile)
     const profileWithTags = {
       ...savedProfile,
       tags: nextProfile.tags,
-      match_mode: nextProfile.match_mode,
+      authors: nextProfile.authors,
     }
 
-    await updateUserTags(profileWithTags.user_id, nextProfile.tags, nextProfile.match_mode)
+    await updateUserTags(profileWithTags.user_id, nextProfile.tags)
 
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileWithTags))
     setProfile(profileWithTags)
-    setSelectedTags(nextProfile.tags)
-    setMatchMode(nextProfile.match_mode)
+    setActiveFeed('recommended')
     setIsProfileOpen(false)
+  }
+
+  function handleFeedChange(nextFeed) {
+    if (nextFeed === 'recommended' && !profile) {
+      setIsProfileOpen(true)
+      return
+    }
+    setActiveFeed(nextFeed)
   }
 
   return (
     <main className="app-shell">
-      <header className="topbar">
+      <header className="topbar compact">
         <div>
-          <p className="eyebrow">Scicommons prototype</p>
-          <h1>Daily academic articles</h1>
+          <h1>Scicommons</h1>
+          <p>Daily academic articles</p>
         </div>
         <button className="profile-button" type="button" onClick={() => setIsProfileOpen(true)}>
-          {profile?.username || 'Set profile'}
+          {profile?.username || 'Log in'}
         </button>
       </header>
 
       <section className="feed-layout" aria-label="Article feed">
-        <FilterBar
-          allTags={allTags}
-          matchMode={matchMode}
-          onMatchModeChange={setMatchMode}
-          onSearchChange={setSearchTerm}
-          onSelectedTagsChange={setSelectedTags}
+        <div className="feed-tabs" aria-label="Feed type">
+          <button
+            className={activeFeed === 'recommended' ? 'is-active' : ''}
+            type="button"
+            onClick={() => handleFeedChange('recommended')}
+          >
+            Recommended
+            {!profile && <span className="locked-label">Locked</span>}
+          </button>
+          <button
+            className={activeFeed === 'all' ? 'is-active' : ''}
+            type="button"
+            onClick={() => handleFeedChange('all')}
+          >
+            All Feed
+          </button>
+        </div>
+
+        <SearchBar
+          keywordQuery={keywordQuery}
+          onKeywordQueryChange={setKeywordQuery}
+          onSemanticQueryChange={setSemanticQuery}
           onSourceChange={setSource}
-          searchTerm={searchTerm}
-          selectedTags={selectedTags}
+          searchMode={searchMode}
+          semanticQuery={semanticQuery}
           source={source}
-          sources={sources}
         />
 
         <div className="feed-summary">
           <span>{isLoading ? 'Loading articles' : `${articles.length} articles`}</span>
-          <span>Mock data for frontend/backend integration</span>
+          <span>
+            {activeFeed === 'recommended' ? 'Recommended feed' : "Yesterday's all feed"}
+          </span>
         </div>
 
         <div className="article-list">
@@ -127,7 +163,7 @@ function App() {
           {!isLoading && articles.length === 0 && (
             <div className="empty-state">
               <h2>No matching articles</h2>
-              <p>Try removing a tag or switching the match mode.</p>
+              <p>Try changing the search terms or source filter.</p>
             </div>
           )}
         </div>

@@ -19,6 +19,18 @@ function buildArticleQuery(filters = {}) {
     params.set('q', filters.q)
   }
 
+  if (filters.semantic_query) {
+    params.set('semantic_query', filters.semantic_query)
+  }
+
+  if (filters.keyword_query) {
+    params.set('keyword_query', filters.keyword_query)
+  }
+
+  if (filters.search_mode && filters.search_mode !== 'none') {
+    params.set('search_mode', filters.search_mode)
+  }
+
   if (filters.date) {
     params.set('date', filters.date)
   }

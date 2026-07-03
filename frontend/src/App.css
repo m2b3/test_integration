@@ -1,6 +1,6 @@
 .app-shell {
   min-height: 100svh;
-  padding: 28px 20px 56px;
+  padding: 16px 20px 48px;
 }
 
 .topbar {
@@ -8,7 +8,7 @@
   display: flex;
   gap: 20px;
   justify-content: space-between;
-  margin: 0 auto 24px;
+  margin: 0 auto 12px;
   max-width: 1000px;
 }
 
@@ -23,9 +23,14 @@
 
 .topbar h1 {
   color: var(--text-strong);
-  font-size: 32px;
+  font-size: 24px;
   line-height: 1.12;
   margin: 0;
+}
+
+.topbar p {
+  color: var(--muted);
+  margin: 2px 0 0;
 }
 
 .profile-button,
@@ -35,7 +40,9 @@
 .match-control button,
 .selected-tags button,
 .profile-tags button,
-.suggestions button {
+.suggestions button,
+.feed-tabs button,
+.source-control button {
   border: 1px solid transparent;
   cursor: pointer;
   font: inherit;
@@ -63,22 +70,59 @@
   max-width: 1000px;
 }
 
-.filter-bar {
+.feed-tabs {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 10px;
+}
+
+.feed-tabs button {
+  align-items: center;
+  background: var(--surface-strong);
+  border-color: var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  display: inline-flex;
+  font-weight: 700;
+  gap: 8px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 7px 12px;
+}
+
+.feed-tabs button.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.locked-label {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 7px;
+}
+
+.search-panel {
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-  padding: 14px;
+  padding: 12px;
   position: sticky;
   top: 12px;
   z-index: 5;
 }
 
-.filter-grid {
+.search-grid {
   align-items: end;
   display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1.2fr) minmax(130px, 0.7fr) auto;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
 }
 
 .field {
@@ -103,9 +147,47 @@ select {
   border-radius: 8px;
   color: var(--text-strong);
   font: inherit;
-  min-height: 40px;
+  min-height: 36px;
   outline: none;
   padding: 8px 10px;
+}
+
+.search-footer {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.source-control {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-flex;
+  overflow: hidden;
+}
+
+.source-control button {
+  background: transparent;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
+.source-control button.is-active {
+  background: var(--accent);
+  color: white;
+}
+
+.search-mode {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: capitalize;
 }
 
 input:focus,
@@ -198,7 +280,7 @@ select:focus {
   display: flex;
   font-size: 14px;
   justify-content: space-between;
-  margin: 14px 2px;
+  margin: 10px 2px;
 }
 
 .article-list {
@@ -210,13 +292,13 @@ select:focus {
   background: var(--surface-strong);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 20px;
+  padding: 16px 18px;
   text-align: left;
 }
 
 .article-card h2 {
   color: var(--text-strong);
-  font-size: 20px;
+  font-size: 18px;
   line-height: 1.25;
   margin: 8px 0 10px;
 }
@@ -318,6 +400,21 @@ select:focus {
   margin: 18px 0 12px;
 }
 
+.interest-section {
+  display: grid;
+  gap: 8px;
+}
+
+.interest-section > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.optional-field {
+  margin-top: 16px;
+}
+
 .profile-tags {
   display: flex;
   flex-wrap: wrap;
@@ -367,11 +464,22 @@ select:focus {
   }
 
   .topbar h1 {
-    font-size: 26px;
+    font-size: 22px;
   }
 
-  .filter-grid {
+  .feed-tabs,
+  .search-grid {
     grid-template-columns: 1fr;
+  }
+
+  .search-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .source-control {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
   }
 
   .feed-summary {

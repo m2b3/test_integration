@@ -226,7 +226,7 @@ def get_user_feed(
     match: MatchMode = "or",
     source: str = "all",
     q: str = "",
-    date_filter: date = Query(default_factory=date.today, alias="date"),
+    date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
     sql, params = article_query(
         user_id=user_id,
