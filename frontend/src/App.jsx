@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { getArticles, getTags, getUserFeed } from './api/articles'
 import { login, updateUserTags } from './api/users'
 import ArticleCard from './components/ArticleCard'
+import ManageInterestsPage from './components/ManageInterestsPage'
 import ProfileModal from './components/ProfileModal'
+import ProfilePage from './components/ProfilePage'
+import RecentlyViewedPage from './components/RecentlyViewedPage'
 import SearchBar from './components/SearchBar'
 import './App.css'
 
 const PROFILE_STORAGE_KEY = 'scicommons.profile'
+const RECENTLY_VIEWED_STORAGE_KEY = 'scicommons.recentlyViewed'
 
 function readStoredProfile() {
   try {
@@ -17,16 +21,28 @@ function readStoredProfile() {
   }
 }
 
+function readRecentlyViewed() {
+  try {
+    const value = window.localStorage.getItem(RECENTLY_VIEWED_STORAGE_KEY)
+    return value ? JSON.parse(value) : []
+  } catch {
+    return []
+  }
+}
+
 function App() {
   const [articles, setArticles] = useState([])
   const [allTags, setAllTags] = useState([])
+  const [recentlyViewed, setRecentlyViewed] = useState(() => readRecentlyViewed())
   const [isLoading, setIsLoading] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
   const [source, setSource] = useState('all')
   const [profile, setProfile] = useState(() => readStoredProfile())
   const [activeFeed, setActiveFeed] = useState(() => (readStoredProfile() ? 'recommended' : 'all'))
+  const [activePage, setActivePage] = useState('feed')
   const [isProfileOpen, setIsProfileOpen] = useState(false)
+  const profileName = profile?.username || profile?.email || 'User'
 
   const searchMode =
     semanticQuery.trim() && keywordQuery.trim()
@@ -99,6 +115,13 @@ function App() {
     setIsProfileOpen(false)
   }
 
+  async function handleInterestSave(nextProfile) {
+    await updateUserTags(nextProfile.user_id, nextProfile.tags)
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(nextProfile))
+    setProfile(nextProfile)
+    setActivePage('profile')
+  }
+
   function handleFeedChange(nextFeed) {
     if (nextFeed === 'recommended' && !profile) {
       setIsProfileOpen(true)
@@ -107,18 +130,58 @@ function App() {
     setActiveFeed(nextFeed)
   }
 
-  return (
-    <main className="app-shell">
-      <header className="topbar compact">
-        <div>
-          <h1>Scicommons</h1>
-          <p>Daily academic articles</p>
-        </div>
-        <button className="profile-button" type="button" onClick={() => setIsProfileOpen(true)}>
-          {profile?.username || 'Log in'}
-        </button>
-      </header>
+  function handleProfileClick() {
+    if (!profile) {
+      setIsProfileOpen(true)
+      return
+    }
+    setActivePage('profile')
+  }
 
+  function handleArticleViewed(article) {
+    const articleKey = article.paper_key || article.id
+    const nextRecentlyViewed = [
+      article,
+      ...recentlyViewed.filter((item) => (item.paper_key || item.id) !== articleKey),
+    ].slice(0, 20)
+
+    setRecentlyViewed(nextRecentlyViewed)
+    window.localStorage.setItem(RECENTLY_VIEWED_STORAGE_KEY, JSON.stringify(nextRecentlyViewed))
+  }
+
+  function renderContent() {
+    if (activePage === 'profile' && profile) {
+      return (
+        <ProfilePage
+          onBack={() => setActivePage('feed')}
+          onManageInterests={() => setActivePage('manage-interests')}
+          onRecentlyViewed={() => setActivePage('recently-viewed')}
+          profile={profile}
+        />
+      )
+    }
+
+    if (activePage === 'recently-viewed' && profile) {
+      return (
+        <RecentlyViewedPage
+          articles={recentlyViewed}
+          onBack={() => setActivePage('profile')}
+        />
+      )
+    }
+
+    if (activePage === 'manage-interests' && profile) {
+      return (
+        <ManageInterestsPage
+          allTags={allTags}
+          onBack={() => setActivePage('profile')}
+          onSave={handleInterestSave}
+          profile={profile}
+        />
+      )
+    }
+
+    return (
       <section className="feed-layout" aria-label="Article feed">
         <div className="feed-tabs" aria-label="Feed type">
           <button
@@ -157,7 +220,11 @@ function App() {
 
         <div className="article-list">
           {articles.map((article) => (
-            <ArticleCard key={article.paper_key} article={article} />
+            <ArticleCard
+              key={article.paper_key}
+              article={article}
+              onView={handleArticleViewed}
+            />
           ))}
 
           {!isLoading && articles.length === 0 && (
@@ -168,6 +235,28 @@ function App() {
           )}
         </div>
       </section>
+    )
+  }
+
+  return (
+    <main className="app-shell">
+      <header className="topbar compact">
+        <div>
+          <h1>Scicommons</h1>
+          <p>Daily academic articles</p>
+        </div>
+        {profile ? (
+          <button className="avatar-button" type="button" onClick={handleProfileClick}>
+            <span className="avatar">{profileName.slice(0, 1).toUpperCase()}</span>
+          </button>
+        ) : (
+          <button className="profile-button" type="button" onClick={handleProfileClick}>
+            Log in
+          </button>
+        )}
+      </header>
+
+      {renderContent()}
 
       {isProfileOpen && (
         <ProfileModal

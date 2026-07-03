@@ -5,11 +5,27 @@ function formatSource(source) {
     .join(' ')
 }
 
-function ArticleCard({ article }) {
+function ArticleCard({ article, onView }) {
   const authors = Array.isArray(article.authors) ? article.authors.join(', ') : article.authors
 
+  function handleKeyDown(event) {
+    if (!onView) {
+      return
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onView(article)
+    }
+  }
+
   return (
-    <article className="article-card">
+    <article
+      className={onView ? 'article-card is-clickable' : 'article-card'}
+      onClick={onView ? () => onView(article) : undefined}
+      onKeyDown={handleKeyDown}
+      role={onView ? 'button' : undefined}
+      tabIndex={onView ? 0 : undefined}
+    >
       <div className="article-meta">
         <span>{formatSource(article.source)}</span>
         <span>{article.published_date}</span>
