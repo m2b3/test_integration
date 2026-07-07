@@ -18,6 +18,32 @@ import RecentlyViewedPage from './components/RecentlyViewedPage'
 import SearchBar from './components/SearchBar'
 import './App.css'
 
+const PROFILE_CACHE_KEY = 'scicommons.cachedProfile'
+const SOURCE_FILTER_KEY = 'scicommons.sourceFilter'
+const SOURCE_VALUES = new Set(['all', 'arxiv', 'pubmed'])
+
+function readJsonCache(key) {
+  try {
+    const value = window.localStorage.getItem(key)
+    return value ? JSON.parse(value) : null
+  } catch {
+    return null
+  }
+}
+
+function writeJsonCache(key, value) {
+  window.localStorage.setItem(key, JSON.stringify(value))
+}
+
+function removeCache(key) {
+  window.localStorage.removeItem(key)
+}
+
+function readSourceFilter() {
+  const value = window.localStorage.getItem(SOURCE_FILTER_KEY)
+  return SOURCE_VALUES.has(value) ? value : 'all'
+}
+
 function App() {
   const [articles, setArticles] = useState([])
   const [recentlyViewed, setRecentlyViewed] = useState([])
@@ -25,9 +51,9 @@ function App() {
   const [isSessionLoading, setIsSessionLoading] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
-  const [source, setSource] = useState('all')
-  const [profile, setProfile] = useState(null)
-  const [activeFeed, setActiveFeed] = useState('all')
+  const [source, setSource] = useState(() => readSourceFilter())
+  const [profile, setProfile] = useState(() => readJsonCache(PROFILE_CACHE_KEY))
+  const [activeFeed, setActiveFeed] = useState(() => (readJsonCache(PROFILE_CACHE_KEY) ? 'recommended' : 'all'))
   const [activePage, setActivePage] = useState('feed')
   const [selectedArticle, setSelectedArticle] = useState(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
@@ -49,10 +75,16 @@ function App() {
       try {
         const currentProfile = await getCurrentUser()
         if (isActive) {
+          writeJsonCache(PROFILE_CACHE_KEY, currentProfile)
           setProfile(currentProfile)
           setActiveFeed('recommended')
         }
       } catch (error) {
+        if (isActive && error.status === 401) {
+          removeCache(PROFILE_CACHE_KEY)
+          setProfile(null)
+          setActiveFeed('all')
+        }
         if (isActive && error.status !== 401) {
           console.error(error)
         }
@@ -71,6 +103,10 @@ function App() {
   }, [])
 
   useEffect(() => {
+    window.localStorage.setItem(SOURCE_FILTER_KEY, source)
+  }, [source])
+
+  useEffect(() => {
     let isActive = true
 
     async function loadArticles() {
@@ -85,14 +121,31 @@ function App() {
         search_mode: searchMode,
         source,
       }
-      const nextArticles =
-        activeFeed === 'recommended' && profile
-          ? await getUserFeed(profile.user_id, filters)
-          : await getArticles(filters)
+      try {
+        const nextArticles =
+          activeFeed === 'recommended' && profile
+            ? await getUserFeed(profile.user_id, filters)
+            : await getArticles(filters)
 
-      if (isActive) {
-        setArticles(nextArticles)
-        setIsLoading(false)
+        if (isActive) {
+          setArticles(nextArticles)
+        }
+      } catch (error) {
+        if (isActive && error.status === 401) {
+          removeCache(PROFILE_CACHE_KEY)
+          setProfile(null)
+          setActiveFeed('all')
+          const publicArticles = await getArticles(filters)
+          if (isActive) {
+            setArticles(publicArticles)
+          }
+        } else {
+          console.error(error)
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false)
+        }
       }
     }
 
@@ -111,6 +164,7 @@ function App() {
       authors: nextProfile.authors,
     })
 
+    writeJsonCache(PROFILE_CACHE_KEY, profileWithTags)
     setProfile(profileWithTags)
     setActiveFeed('recommended')
     setIsProfileOpen(false)
@@ -118,6 +172,7 @@ function App() {
 
   async function handleInterestSave(nextProfile) {
     const savedProfile = await updateUserProfile(nextProfile.user_id, nextProfile)
+    writeJsonCache(PROFILE_CACHE_KEY, savedProfile)
     setProfile(savedProfile)
     setActivePage('profile')
   }
@@ -129,12 +184,14 @@ function App() {
     }
 
     const latestProfile = await getUserProfile(profile.user_id)
+    writeJsonCache(PROFILE_CACHE_KEY, latestProfile)
     setProfile(latestProfile)
     setActivePage('manage-interests')
   }
 
   async function handleLogout() {
     await logout()
+    removeCache(PROFILE_CACHE_KEY)
     setProfile(null)
     setRecentlyViewed([])
     setActiveFeed('all')

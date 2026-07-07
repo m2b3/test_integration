@@ -23,8 +23,9 @@ PUT  /users/{user_id}/tags
 
 `POST /login` creates a backend session in `user_sessions` and sets an HTTP-only
 `scicommons_session` cookie. The frontend should send API requests with
-credentials included, then use `GET /me` on refresh instead of storing user
-profile data in local storage.
+credentials included, then use `GET /me` on refresh to verify the active user.
+The frontend may cache the last profile and UI filters in local storage for a
+faster remembered UI, but Postgres/session state remains the source of truth.
 
 ## Feed Endpoints
 

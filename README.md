@@ -189,5 +189,5 @@ PUT  /users/{user_id}/tags
 - Frontend dev server runs on port `5173`.
 - Postgres runs on local port `5432`.
 - Frontend `.env` is intentionally not committed; recreate it on each server.
-- User login/session/profile/interests/recently viewed are stored through the backend and Postgres. The browser only keeps the HTTP-only session cookie set by `/login`.
+- User login/session/profile/interests/recently viewed are stored through the backend and Postgres. The browser also keeps a non-authoritative cache of the last profile and source filter so refreshes feel remembered; `/me` verifies the session and refreshes profile data from the DB.
 - This is a prototype deployment. Later, frontend/backend/database can be separated if needed.
