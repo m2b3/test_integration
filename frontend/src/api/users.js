@@ -11,6 +11,29 @@ export async function getUserTags(userId) {
   return requestJson(`/users/${userId}/tags`)
 }
 
+export async function getUserProfile(userId) {
+  return requestJson(`/users/${userId}/profile`)
+}
+
+export async function updateUserProfile(userId, profile) {
+  const authors = Array.isArray(profile.authors)
+    ? profile.authors
+    : String(profile.authors || '')
+        .split(',')
+        .map((author) => author.trim())
+        .filter(Boolean)
+
+  return requestJson(`/users/${userId}/profile`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      username: profile.username,
+      email: profile.email,
+      tags: profile.tags || [],
+      authors,
+    }),
+  })
+}
+
 export async function updateUserTags(userId, tags, matchMode = 'or') {
   return requestJson(`/users/${userId}/tags`, {
     method: 'PUT',

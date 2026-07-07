@@ -10,6 +10,8 @@ GET  /tags
 GET  /sources
 GET  /articles
 GET  /users/{user_id}/feed
+GET  /users/{user_id}/profile
+PUT  /users/{user_id}/profile
 GET  /users/{user_id}/tags
 GET  /users/{user_id}/recently-viewed?limit=20
 POST /users/{user_id}/recently-viewed
@@ -65,6 +67,8 @@ Later, these params should route into the embedding/search pipeline.
 Implemented:
 
 ```text
+GET /users/{user_id}/profile
+PUT /users/{user_id}/profile
 GET /users/{user_id}/tags
 PUT /users/{user_id}/tags
 ```
@@ -78,7 +82,6 @@ fields of interest as free-form strings
 Likely future preferences:
 
 ```text
-authors_to_follow
 favorite_articles
 recently_viewed
 ```
@@ -110,8 +113,6 @@ POST /users/{user_id}/recently-viewed
 Likely future endpoints:
 
 ```text
-GET  /users/{user_id}/profile
-PUT  /users/{user_id}/profile
 GET  /users/{user_id}/saved-articles
 POST /users/{user_id}/saved-articles
 DELETE /users/{user_id}/saved-articles/{article_id}

@@ -25,9 +25,9 @@ except ImportError as exc:
 
 
 USERS = [
-    {"id": "user-1", "email": "u1@example.com"},
-    {"id": "user-2", "email": "u2@example.com"},
-    {"id": "user-3", "email": "u3@example.com"},
+    {"id": "user-1", "email": "u1@example.com", "username": "User One"},
+    {"id": "user-2", "email": "u2@example.com", "username": "User Two"},
+    {"id": "user-3", "email": "u3@example.com", "username": "User Three"},
 ]
 
 TAGS = [
@@ -43,6 +43,11 @@ USER_TAGS = [
     {"user_id": "user-2", "tag_id": "machine-learning"},
     {"user_id": "user-3", "tag_id": "chemistry"},
     {"user_id": "user-3", "tag_id": "medicine"},
+]
+
+USER_AUTHORS = [
+    {"user_id": "user-1", "author_name": "bio author"},
+    {"user_id": "user-3", "author_name": "chem author"},
 ]
 
 ARTICLES = [
@@ -150,6 +155,7 @@ DROP_TABLES_SQL = """
 DROP TABLE IF EXISTS user_recently_viewed;
 DROP TABLE IF EXISTS user_daily_feed;
 DROP TABLE IF EXISTS article_tags;
+DROP TABLE IF EXISTS user_authors;
 DROP TABLE IF EXISTS user_tags;
 DROP TABLE IF EXISTS articles;
 DROP TABLE IF EXISTS tags;
@@ -160,7 +166,9 @@ DROP TABLE IF EXISTS users;
 CREATE_TABLES_SQL = """
 CREATE TABLE users (
     id TEXT PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE
+    email TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE tags (
@@ -172,6 +180,13 @@ CREATE TABLE user_tags (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
     PRIMARY KEY (user_id, tag_id)
+);
+
+CREATE TABLE user_authors (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    author_name TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, author_name)
 );
 
 CREATE TABLE articles (
@@ -213,6 +228,7 @@ CREATE TABLE user_recently_viewed (
 );
 
 CREATE INDEX idx_user_tags_tag_id ON user_tags(tag_id);
+CREATE INDEX idx_user_authors_author_name ON user_authors(author_name);
 CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id);
 CREATE INDEX idx_articles_published_date ON articles(published_date);
 CREATE INDEX idx_articles_source ON articles(source);
@@ -249,9 +265,10 @@ def main() -> int:
         with conn.cursor() as cur:
             cur.execute(DROP_TABLES_SQL)
             cur.execute(CREATE_TABLES_SQL)
-            insert_rows(cur, "users", ["id", "email"], USERS)
+            insert_rows(cur, "users", ["id", "email", "username"], USERS)
             insert_rows(cur, "tags", ["id", "name"], TAGS)
             insert_rows(cur, "user_tags", ["user_id", "tag_id"], USER_TAGS)
+            insert_rows(cur, "user_authors", ["user_id", "author_name"], USER_AUTHORS)
             insert_rows(
                 cur,
                 "articles",

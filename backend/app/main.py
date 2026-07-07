@@ -45,6 +45,13 @@ class TagsUpdateRequest(BaseModel):
     match_mode: MatchMode = "or"
 
 
+class UserProfileUpdateRequest(BaseModel):
+    username: str | None = None
+    email: str | None = None
+    tags: list[str] | None = None
+    authors: list[str] | None = None
+
+
 class RecentlyViewedRequest(BaseModel):
     article_key: str | None = None
     id: str | None = None
@@ -71,6 +78,14 @@ def parse_tags(tags: str | None) -> list[str]:
     if not tags:
         return []
     return [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+
+def clean_unique_strings(values: list[str]) -> list[str]:
+    return [
+        value
+        for value in dict.fromkeys(value.strip() for value in values)
+        if value
+    ]
 
 
 def normalize_article(row: dict) -> dict:
@@ -100,6 +115,82 @@ def normalize_recently_viewed(row: dict) -> dict:
         if hasattr(row["viewed_at"], "isoformat")
         else row["viewed_at"],
     }
+
+
+def get_profile(cur: psycopg.Cursor, user_id: str) -> dict:
+    cur.execute("SELECT id, email, username FROM users WHERE id = %s", [user_id])
+    user = cur.fetchone()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cur.execute(
+        """
+        SELECT tag_id
+        FROM user_tags
+        WHERE user_id = %s
+        ORDER BY tag_id ASC
+        """,
+        [user_id],
+    )
+    tags = [row["tag_id"] for row in cur.fetchall()]
+
+    cur.execute(
+        """
+        SELECT author_name
+        FROM user_authors
+        WHERE user_id = %s
+        ORDER BY author_name ASC
+        """,
+        [user_id],
+    )
+    authors = [row["author_name"] for row in cur.fetchall()]
+
+    return {
+        "user_id": user["id"],
+        "username": user["username"],
+        "email": user["email"],
+        "tags": tags,
+        "authors": authors,
+    }
+
+
+def replace_user_tags(cur: psycopg.Cursor, user_id: str, tags: list[str]) -> list[str]:
+    unique_tags = clean_unique_strings(tags)
+
+    if unique_tags:
+        cur.executemany(
+            """
+            INSERT INTO tags (id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+            """,
+            [(tag, tag) for tag in unique_tags],
+        )
+
+    cur.execute("DELETE FROM user_tags WHERE user_id = %s", [user_id])
+    if unique_tags:
+        cur.executemany(
+            """
+            INSERT INTO user_tags (user_id, tag_id)
+            VALUES (%s, %s)
+            """,
+            [(user_id, tag_id) for tag_id in unique_tags],
+        )
+    return unique_tags
+
+
+def replace_user_authors(cur: psycopg.Cursor, user_id: str, authors: list[str]) -> list[str]:
+    unique_authors = clean_unique_strings(authors)
+    cur.execute("DELETE FROM user_authors WHERE user_id = %s", [user_id])
+    if unique_authors:
+        cur.executemany(
+            """
+            INSERT INTO user_authors (user_id, author_name)
+            VALUES (%s, %s)
+            """,
+            [(user_id, author_name) for author_name in unique_authors],
+        )
+    return unique_authors
 
 
 def article_query(
@@ -292,42 +383,43 @@ def get_user_tags(user_id: str, conn: Annotated[psycopg.Connection, Depends(get_
         return {"user_id": user_id, "tags": list(cur.fetchall())}
 
 
+@app.get("/users/{user_id}/profile")
+def get_user_profile(user_id: str, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
+    with conn.cursor() as cur:
+        return get_profile(cur, user_id)
+
+
 @app.post("/login")
 def login(payload: LoginRequest, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
     with conn.cursor() as cur:
-        cur.execute("SELECT id, email FROM users WHERE email = %s", [payload.email])
+        cur.execute("SELECT id, email, username FROM users WHERE email = %s", [payload.email])
         user = cur.fetchone()
 
         if user is None:
             user_id = "demo-" + payload.email.lower().replace("@", "-").replace(".", "-")
             cur.execute(
                 """
-                INSERT INTO users (id, email)
-                VALUES (%s, %s)
+                INSERT INTO users (id, email, username)
+                VALUES (%s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
-                RETURNING id, email
+                RETURNING id, email, username
                 """,
-                [user_id, payload.email],
+                [user_id, payload.email, payload.username],
+            )
+            user = cur.fetchone()
+        elif payload.username.strip():
+            cur.execute(
+                """
+                UPDATE users
+                SET username = %s
+                WHERE id = %s
+                RETURNING id, email, username
+                """,
+                [payload.username.strip(), user["id"]],
             )
             user = cur.fetchone()
 
-        cur.execute(
-            """
-            SELECT tag_id
-            FROM user_tags
-            WHERE user_id = %s
-            ORDER BY tag_id ASC
-            """,
-            [user["id"]],
-        )
-        user_tags = [row["tag_id"] for row in cur.fetchall()]
-
-    return {
-        "user_id": user["id"],
-        "username": payload.username,
-        "email": user["email"],
-        "tags": user_tags,
-    }
+        return get_profile(cur, user["id"])
 
 
 @app.put("/users/{user_id}/tags")
@@ -336,42 +428,46 @@ def update_user_tags(
     payload: TagsUpdateRequest,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
-    unique_tags = [
-        tag
-        for tag in dict.fromkeys(tag.strip() for tag in payload.tags)
-        if tag
-    ]
-
     with conn.cursor() as cur:
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
-
-        if unique_tags:
-            cur.executemany(
-                """
-                INSERT INTO tags (id, name)
-                VALUES (%s, %s)
-                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-                """,
-                [(tag, tag) for tag in unique_tags],
-            )
-
-        cur.execute("DELETE FROM user_tags WHERE user_id = %s", [user_id])
-        if unique_tags:
-            cur.executemany(
-                """
-                INSERT INTO user_tags (user_id, tag_id)
-                VALUES (%s, %s)
-                """,
-                [(user_id, tag_id) for tag_id in unique_tags],
-            )
+        unique_tags = replace_user_tags(cur, user_id, payload.tags)
 
     return {
         "user_id": user_id,
         "tags": unique_tags,
         "match_mode": payload.match_mode,
     }
+
+
+@app.put("/users/{user_id}/profile")
+def update_user_profile(
+    user_id: str,
+    payload: UserProfileUpdateRequest,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
+    with conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if payload.username is not None:
+            cur.execute(
+                "UPDATE users SET username = %s WHERE id = %s",
+                [payload.username.strip(), user_id],
+            )
+        if payload.email is not None:
+            cur.execute(
+                "UPDATE users SET email = %s WHERE id = %s",
+                [payload.email.strip(), user_id],
+            )
+        if payload.tags is not None:
+            replace_user_tags(cur, user_id, payload.tags)
+        if payload.authors is not None:
+            replace_user_authors(cur, user_id, payload.authors)
+
+        return get_profile(cur, user_id)
 
 
 @app.get("/users/{user_id}/recently-viewed")

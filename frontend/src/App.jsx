@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
-import { addRecentlyViewed, getRecentlyViewed, login, updateUserTags } from './api/users'
+import { addRecentlyViewed, getRecentlyViewed, login, updateUserProfile } from './api/users'
 import ArticleCard from './components/ArticleCard'
 import ManageInterestsPage from './components/ManageInterestsPage'
 import ProfileModal from './components/ProfileModal'
@@ -73,13 +73,11 @@ function App() {
 
   async function handleProfileSave(nextProfile) {
     const savedProfile = await login(nextProfile)
-    const profileWithTags = {
+    const profileWithTags = await updateUserProfile(savedProfile.user_id, {
       ...savedProfile,
       tags: nextProfile.tags,
       authors: nextProfile.authors,
-    }
-
-    await updateUserTags(profileWithTags.user_id, nextProfile.tags)
+    })
 
     window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileWithTags))
     setProfile(profileWithTags)
@@ -88,9 +86,9 @@ function App() {
   }
 
   async function handleInterestSave(nextProfile) {
-    await updateUserTags(nextProfile.user_id, nextProfile.tags)
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(nextProfile))
-    setProfile(nextProfile)
+    const savedProfile = await updateUserProfile(nextProfile.user_id, nextProfile)
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(savedProfile))
+    setProfile(savedProfile)
     setActivePage('profile')
   }
 
