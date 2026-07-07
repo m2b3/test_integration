@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
 import { addRecentlyViewed, getRecentlyViewed, login, updateUserProfile } from './api/users'
 import ArticleCard from './components/ArticleCard'
+import ArticleDetailPage from './components/ArticleDetailPage'
 import ManageInterestsPage from './components/ManageInterestsPage'
 import ProfileModal from './components/ProfileModal'
 import ProfilePage from './components/ProfilePage'
@@ -30,6 +31,7 @@ function App() {
   const [profile, setProfile] = useState(() => readStoredProfile())
   const [activeFeed, setActiveFeed] = useState(() => (readStoredProfile() ? 'recommended' : 'all'))
   const [activePage, setActivePage] = useState('feed')
+  const [selectedArticle, setSelectedArticle] = useState(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
   const profileName = profile?.username || profile?.email || 'User'
 
@@ -118,18 +120,29 @@ function App() {
     setActivePage('recently-viewed')
   }
 
-  async function handleArticleViewed(article) {
-    if (!profile) {
-      return
+  async function handleArticleOpen(article) {
+    setSelectedArticle(article)
+    setActivePage('paper')
+
+    if (profile) {
+      const viewedArticle = await addRecentlyViewed(profile.user_id, article)
+      setRecentlyViewed((currentArticles) => [
+        viewedArticle,
+        ...currentArticles.filter((item) => (item.paper_key || item.id) !== viewedArticle.paper_key),
+      ].slice(0, 20))
     }
-    const viewedArticle = await addRecentlyViewed(profile.user_id, article)
-    setRecentlyViewed((currentArticles) => [
-      viewedArticle,
-      ...currentArticles.filter((item) => (item.paper_key || item.id) !== viewedArticle.paper_key),
-    ].slice(0, 20))
   }
 
   function renderContent() {
+    if (activePage === 'paper' && selectedArticle) {
+      return (
+        <ArticleDetailPage
+          article={selectedArticle}
+          onBack={() => setActivePage('feed')}
+        />
+      )
+    }
+
     if (activePage === 'profile' && profile) {
       return (
         <ProfilePage
@@ -145,6 +158,7 @@ function App() {
       return (
         <RecentlyViewedPage
           articles={recentlyViewed}
+          onArticleOpen={handleArticleOpen}
           onBack={() => setActivePage('profile')}
         />
       )
@@ -202,7 +216,7 @@ function App() {
             <ArticleCard
               key={article.paper_key}
               article={article}
-              onView={profile ? handleArticleViewed : undefined}
+              onView={handleArticleOpen}
             />
           ))}
 
