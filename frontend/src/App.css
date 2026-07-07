@@ -619,7 +619,7 @@ select:focus {
   align-items: center;
   background: var(--tag-bg);
   border: 1px solid var(--tag-border);
-  border-radius: 999px;
+  border-radius: 8px;
   color: var(--tag-text);
   display: inline-flex;
   font-size: 13px;
@@ -640,11 +640,22 @@ select:focus {
   height: 18px;
   justify-content: center;
   line-height: 1;
+  opacity: 0;
   padding: 0;
+  pointer-events: none;
   position: absolute;
   right: -4px;
   top: -5px;
+  transition: border-color 120ms ease, color 120ms ease, opacity 120ms ease, transform 120ms ease;
+  transform: scale(0.9);
   width: 18px;
+}
+
+.interest-chip:hover button,
+.interest-chip:focus-within button {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
 }
 
 .interest-chip button:hover {

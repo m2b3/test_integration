@@ -1,12 +1,19 @@
 import { useState } from 'react'
 import InterestInput from './InterestInput'
 
+function authorsToText(authors) {
+  if (Array.isArray(authors)) {
+    return authors.join(', ')
+  }
+  return authors || ''
+}
+
 function ProfileModal({ initialProfile, onClose, onSave }) {
   const [step, setStep] = useState(initialProfile ? 'interests' : 'account')
   const [username, setUsername] = useState(initialProfile?.username || '')
   const [email, setEmail] = useState(initialProfile?.email || '')
   const [tags, setTags] = useState(initialProfile?.tags || [])
-  const [authors, setAuthors] = useState(initialProfile?.authors || '')
+  const [authors, setAuthors] = useState(() => authorsToText(initialProfile?.authors))
 
   function handleAccountSubmit(event) {
     event.preventDefault()

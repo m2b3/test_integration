@@ -1,9 +1,16 @@
 import { useState } from 'react'
 import InterestInput from './InterestInput'
 
+function authorsToText(authors) {
+  if (Array.isArray(authors)) {
+    return authors.join(', ')
+  }
+  return authors || ''
+}
+
 function ManageInterestsPage({ onBack, onSave, profile }) {
   const [tags, setTags] = useState(profile?.tags || [])
-  const [authors, setAuthors] = useState(profile?.authors || '')
+  const [authors, setAuthors] = useState(() => authorsToText(profile?.authors))
 
   function handleSubmit(event) {
     event.preventDefault()

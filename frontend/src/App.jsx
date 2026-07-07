@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
-import { addRecentlyViewed, getRecentlyViewed, login, updateUserProfile } from './api/users'
+import { addRecentlyViewed, getRecentlyViewed, getUserProfile, login, updateUserProfile } from './api/users'
 import ArticleCard from './components/ArticleCard'
 import ArticleDetailPage from './components/ArticleDetailPage'
 import ManageInterestsPage from './components/ManageInterestsPage'
@@ -94,6 +94,18 @@ function App() {
     setActivePage('profile')
   }
 
+  async function handleManageInterestsPage() {
+    if (!profile) {
+      setIsProfileOpen(true)
+      return
+    }
+
+    const latestProfile = await getUserProfile(profile.user_id)
+    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(latestProfile))
+    setProfile(latestProfile)
+    setActivePage('manage-interests')
+  }
+
   function handleFeedChange(nextFeed) {
     if (nextFeed === 'recommended' && !profile) {
       setIsProfileOpen(true)
@@ -147,7 +159,7 @@ function App() {
       return (
         <ProfilePage
           onBack={() => setActivePage('feed')}
-          onManageInterests={() => setActivePage('manage-interests')}
+          onManageInterests={handleManageInterestsPage}
           onRecentlyViewed={handleRecentlyViewedPage}
           profile={profile}
         />
@@ -167,6 +179,7 @@ function App() {
     if (activePage === 'manage-interests' && profile) {
       return (
         <ManageInterestsPage
+          key={`${profile.user_id}-${(profile.tags || []).join('|')}-${(profile.authors || []).join('|')}`}
           onBack={() => setActivePage('profile')}
           onSave={handleInterestSave}
           profile={profile}
