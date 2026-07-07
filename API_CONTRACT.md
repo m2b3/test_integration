@@ -16,8 +16,15 @@ GET  /users/{user_id}/tags
 GET  /users/{user_id}/recently-viewed?limit=20
 POST /users/{user_id}/recently-viewed
 POST /login
+GET  /me
+POST /logout
 PUT  /users/{user_id}/tags
 ```
+
+`POST /login` creates a backend session in `user_sessions` and sets an HTTP-only
+`scicommons_session` cookie. The frontend should send API requests with
+credentials included, then use `GET /me` on refresh instead of storing user
+profile data in local storage.
 
 ## Feed Endpoints
 
@@ -33,6 +40,8 @@ Recommended requires a logged-in user:
 ```text
 GET /users/{user_id}/feed
 ```
+
+User-specific endpoints require the active session cookie to match `{user_id}`.
 
 All Feed does not require login:
 
@@ -67,6 +76,9 @@ Later, these params should route into the embedding/search pipeline.
 Implemented:
 
 ```text
+POST /login
+GET /me
+POST /logout
 GET /users/{user_id}/profile
 PUT /users/{user_id}/profile
 GET /users/{user_id}/tags

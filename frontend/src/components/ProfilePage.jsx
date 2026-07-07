@@ -1,4 +1,4 @@
-function ProfilePage({ onBack, onManageInterests, onRecentlyViewed, profile }) {
+function ProfilePage({ onBack, onLogout, onManageInterests, onRecentlyViewed, profile }) {
   const displayName = profile?.username || profile?.email || 'Profile'
 
   return (
@@ -21,6 +21,9 @@ function ProfilePage({ onBack, onManageInterests, onRecentlyViewed, profile }) {
         </button>
         <button type="button" onClick={onManageInterests}>
           Manage interests
+        </button>
+        <button type="button" onClick={onLogout}>
+          Log out
         </button>
       </div>
     </section>

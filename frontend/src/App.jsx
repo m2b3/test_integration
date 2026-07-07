@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
-import { addRecentlyViewed, getRecentlyViewed, getUserProfile, login, updateUserProfile } from './api/users'
+import {
+  addRecentlyViewed,
+  getCurrentUser,
+  getRecentlyViewed,
+  getUserProfile,
+  login,
+  logout,
+  updateUserProfile,
+} from './api/users'
 import ArticleCard from './components/ArticleCard'
 import ArticleDetailPage from './components/ArticleDetailPage'
 import ManageInterestsPage from './components/ManageInterestsPage'
@@ -10,26 +18,16 @@ import RecentlyViewedPage from './components/RecentlyViewedPage'
 import SearchBar from './components/SearchBar'
 import './App.css'
 
-const PROFILE_STORAGE_KEY = 'scicommons.profile'
-
-function readStoredProfile() {
-  try {
-    const value = window.localStorage.getItem(PROFILE_STORAGE_KEY)
-    return value ? JSON.parse(value) : null
-  } catch {
-    return null
-  }
-}
-
 function App() {
   const [articles, setArticles] = useState([])
   const [recentlyViewed, setRecentlyViewed] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isSessionLoading, setIsSessionLoading] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
   const [source, setSource] = useState('all')
-  const [profile, setProfile] = useState(() => readStoredProfile())
-  const [activeFeed, setActiveFeed] = useState(() => (readStoredProfile() ? 'recommended' : 'all'))
+  const [profile, setProfile] = useState(null)
+  const [activeFeed, setActiveFeed] = useState('all')
   const [activePage, setActivePage] = useState('feed')
   const [selectedArticle, setSelectedArticle] = useState(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
@@ -47,7 +45,39 @@ function App() {
   useEffect(() => {
     let isActive = true
 
+    async function loadCurrentUser() {
+      try {
+        const currentProfile = await getCurrentUser()
+        if (isActive) {
+          setProfile(currentProfile)
+          setActiveFeed('recommended')
+        }
+      } catch (error) {
+        if (isActive && error.status !== 401) {
+          console.error(error)
+        }
+      } finally {
+        if (isActive) {
+          setIsSessionLoading(false)
+        }
+      }
+    }
+
+    loadCurrentUser()
+
+    return () => {
+      isActive = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let isActive = true
+
     async function loadArticles() {
+      if (isSessionLoading) {
+        return
+      }
+
       setIsLoading(true)
       const filters = {
         semantic_query: semanticQuery,
@@ -71,7 +101,7 @@ function App() {
     return () => {
       isActive = false
     }
-  }, [activeFeed, keywordQuery, profile, searchMode, semanticQuery, source])
+  }, [activeFeed, isSessionLoading, keywordQuery, profile, searchMode, semanticQuery, source])
 
   async function handleProfileSave(nextProfile) {
     const savedProfile = await login(nextProfile)
@@ -81,7 +111,6 @@ function App() {
       authors: nextProfile.authors,
     })
 
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(profileWithTags))
     setProfile(profileWithTags)
     setActiveFeed('recommended')
     setIsProfileOpen(false)
@@ -89,7 +118,6 @@ function App() {
 
   async function handleInterestSave(nextProfile) {
     const savedProfile = await updateUserProfile(nextProfile.user_id, nextProfile)
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(savedProfile))
     setProfile(savedProfile)
     setActivePage('profile')
   }
@@ -101,9 +129,16 @@ function App() {
     }
 
     const latestProfile = await getUserProfile(profile.user_id)
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(latestProfile))
     setProfile(latestProfile)
     setActivePage('manage-interests')
+  }
+
+  async function handleLogout() {
+    await logout()
+    setProfile(null)
+    setRecentlyViewed([])
+    setActiveFeed('all')
+    setActivePage('feed')
   }
 
   function handleFeedChange(nextFeed) {
@@ -159,6 +194,7 @@ function App() {
       return (
         <ProfilePage
           onBack={() => setActivePage('feed')}
+          onLogout={handleLogout}
           onManageInterests={handleManageInterestsPage}
           onRecentlyViewed={handleRecentlyViewedPage}
           profile={profile}

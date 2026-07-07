@@ -152,6 +152,7 @@ USER_DAILY_FEED = [
 
 
 DROP_TABLES_SQL = """
+DROP TABLE IF EXISTS user_sessions;
 DROP TABLE IF EXISTS user_recently_viewed;
 DROP TABLE IF EXISTS user_daily_feed;
 DROP TABLE IF EXISTS article_tags;
@@ -187,6 +188,14 @@ CREATE TABLE user_authors (
     author_name TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, author_name)
+);
+
+CREATE TABLE user_sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
 );
 
 CREATE TABLE articles (
@@ -229,6 +238,8 @@ CREATE TABLE user_recently_viewed (
 
 CREATE INDEX idx_user_tags_tag_id ON user_tags(tag_id);
 CREATE INDEX idx_user_authors_author_name ON user_authors(author_name);
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id);
 CREATE INDEX idx_articles_published_date ON articles(published_date);
 CREATE INDEX idx_articles_source ON articles(source);

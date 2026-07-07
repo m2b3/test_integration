@@ -7,6 +7,16 @@ export async function login({ username = 'Demo User', email }) {
   })
 }
 
+export async function getCurrentUser() {
+  return requestJson('/me')
+}
+
+export async function logout() {
+  return requestJson('/logout', {
+    method: 'POST',
+  })
+}
+
 export async function getUserTags(userId) {
   return requestJson(`/users/${userId}/tags`)
 }

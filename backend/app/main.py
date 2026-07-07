@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import secrets
 from datetime import date
 from typing import Annotated, Literal
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.rows import dict_row
 from pydantic import BaseModel
@@ -13,6 +15,8 @@ from pydantic import BaseModel
 
 DEFAULT_DATABASE_URL = "postgresql://scicommons:scicommons@localhost:5432/scicommons"
 MatchMode = Literal["and", "or"]
+SESSION_COOKIE_NAME = "scicommons_session"
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 
 
 app = FastAPI(title="Scicommons Prototype API")
@@ -86,6 +90,75 @@ def clean_unique_strings(values: list[str]) -> list[str]:
         for value in dict.fromkeys(value.strip() for value in values)
         if value
     ]
+
+
+def session_cookie_secure() -> bool:
+    return os.getenv("SESSION_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
+
+
+def session_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def create_session(cur: psycopg.Cursor, user_id: str) -> str:
+    token = secrets.token_urlsafe(32)
+    cur.execute(
+        """
+        INSERT INTO user_sessions (token_hash, user_id, expires_at)
+        VALUES (%s, %s, now() + (%s || ' seconds')::interval)
+        """,
+        [session_token_hash(token), user_id, SESSION_MAX_AGE_SECONDS],
+    )
+    return token
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=session_cookie_secure(),
+        samesite="lax",
+        path="/",
+    )
+
+
+def get_session_user_id(request: Request, cur: psycopg.Cursor) -> str:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not logged in")
+
+    cur.execute(
+        """
+        UPDATE user_sessions
+        SET last_seen_at = now()
+        WHERE token_hash = %s
+          AND expires_at > now()
+        RETURNING user_id
+        """,
+        [session_token_hash(token)],
+    )
+    session = cur.fetchone()
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+    return session["user_id"]
+
+
+def require_user_session(request: Request, cur: psycopg.Cursor, user_id: str) -> None:
+    session_user_id = get_session_user_id(request, cur)
+    if session_user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another user")
 
 
 def normalize_article(row: dict) -> dict:
@@ -343,6 +416,7 @@ def get_articles(
 @app.get("/users/{user_id}/feed")
 def get_user_feed(
     user_id: str,
+    request: Request,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
     tags: str | None = None,
     match: MatchMode = "or",
@@ -350,6 +424,9 @@ def get_user_feed(
     q: str = "",
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
+    with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
+
     sql, params = article_query(
         user_id=user_id,
         tags=parse_tags(tags),
@@ -364,8 +441,13 @@ def get_user_feed(
 
 
 @app.get("/users/{user_id}/tags")
-def get_user_tags(user_id: str, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
+def get_user_tags(
+    user_id: str,
+    request: Request,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -384,13 +466,22 @@ def get_user_tags(user_id: str, conn: Annotated[psycopg.Connection, Depends(get_
 
 
 @app.get("/users/{user_id}/profile")
-def get_user_profile(user_id: str, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
+def get_user_profile(
+    user_id: str,
+    request: Request,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         return get_profile(cur, user_id)
 
 
 @app.post("/login")
-def login(payload: LoginRequest, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
+def login(
+    payload: LoginRequest,
+    response: Response,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
     with conn.cursor() as cur:
         cur.execute("SELECT id, email, username FROM users WHERE email = %s", [payload.email])
         user = cur.fetchone()
@@ -419,16 +510,42 @@ def login(payload: LoginRequest, conn: Annotated[psycopg.Connection, Depends(get
             )
             user = cur.fetchone()
 
+        token = create_session(cur, user["id"])
+        set_session_cookie(response, token)
         return get_profile(cur, user["id"])
+
+
+@app.get("/me")
+def get_current_user(request: Request, conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
+    with conn.cursor() as cur:
+        user_id = get_session_user_id(request, cur)
+        return get_profile(cur, user_id)
+
+
+@app.post("/logout")
+def logout(
+    request: Request,
+    response: Response,
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_sessions WHERE token_hash = %s", [session_token_hash(token)])
+
+    clear_session_cookie(response)
+    return {"status": "ok"}
 
 
 @app.put("/users/{user_id}/tags")
 def update_user_tags(
     user_id: str,
     payload: TagsUpdateRequest,
+    request: Request,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -445,9 +562,11 @@ def update_user_tags(
 def update_user_profile(
     user_id: str,
     payload: UserProfileUpdateRequest,
+    request: Request,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -473,10 +592,12 @@ def update_user_profile(
 @app.get("/users/{user_id}/recently-viewed")
 def get_recently_viewed(
     user_id: str,
+    request: Request,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[dict]:
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -508,6 +629,7 @@ def get_recently_viewed(
 def add_recently_viewed(
     user_id: str,
     payload: RecentlyViewedRequest,
+    request: Request,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
     article_key = (payload.article_key or payload.id or "").strip()
@@ -515,6 +637,7 @@ def add_recently_viewed(
         raise HTTPException(status_code=400, detail="article_key or id is required")
 
     with conn.cursor() as cur:
+        require_user_session(request, cur, user_id)
         cur.execute("SELECT 1 FROM users WHERE id = %s", [user_id])
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")

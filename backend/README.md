@@ -35,5 +35,15 @@ DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons uvicor
 - `GET /articles?tags=biology,chemistry&match=or&source=all`
 - `GET /users/{user_id}/feed`
 - `GET /users/{user_id}/tags`
+- `GET /users/{user_id}/profile`
+- `PUT /users/{user_id}/profile`
+- `GET /users/{user_id}/recently-viewed`
+- `POST /users/{user_id}/recently-viewed`
 - `POST /login`
+- `GET /me`
+- `POST /logout`
 - `PUT /users/{user_id}/tags`
+
+`POST /login` creates a row in `user_sessions` and sets an HTTP-only
+`scicommons_session` cookie. User-specific endpoints require that session cookie
+to match the requested user.
