@@ -156,16 +156,24 @@ function App() {
     }
   }, [activeFeed, isSessionLoading, keywordQuery, profile, searchMode, semanticQuery, source])
 
-  async function handleProfileSave(nextProfile) {
+  async function handleProfileLogin(nextProfile) {
     const savedProfile = await login(nextProfile)
-    const profileWithTags = await updateUserProfile(savedProfile.user_id, {
-      ...savedProfile,
-      tags: nextProfile.tags,
-      authors: nextProfile.authors,
-    })
 
-    writeJsonCache(PROFILE_CACHE_KEY, profileWithTags)
-    setProfile(profileWithTags)
+    writeJsonCache(PROFILE_CACHE_KEY, savedProfile)
+    setProfile(savedProfile)
+    setActiveFeed('recommended')
+
+    if (!nextProfile.createAccount) {
+      setIsProfileOpen(false)
+    }
+
+    return savedProfile
+  }
+
+  async function handleProfileCreateInterestsSave(nextProfile) {
+    const savedProfile = await updateUserProfile(nextProfile.user_id, nextProfile)
+    writeJsonCache(PROFILE_CACHE_KEY, savedProfile)
+    setProfile(savedProfile)
     setActiveFeed('recommended')
     setIsProfileOpen(false)
   }
@@ -361,7 +369,8 @@ function App() {
         <ProfileModal
           initialProfile={profile}
           onClose={() => setIsProfileOpen(false)}
-          onSave={handleProfileSave}
+          onLogin={handleProfileLogin}
+          onSaveInterests={handleProfileCreateInterestsSave}
         />
       )}
     </main>

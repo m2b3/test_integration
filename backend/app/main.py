@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import hashlib
+import re
 import secrets
 from datetime import date
 from typing import Annotated, Literal
@@ -17,6 +18,7 @@ DEFAULT_DATABASE_URL = "postgresql://scicommons:scicommons@localhost:5432/scicom
 MatchMode = Literal["and", "or"]
 SESSION_COOKIE_NAME = "scicommons_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 app = FastAPI(title="Scicommons Prototype API")
@@ -40,8 +42,9 @@ app.add_middleware(
 
 
 class LoginRequest(BaseModel):
-    username: str = "Demo User"
+    username: str
     email: str
+    create_account: bool = False
 
 
 class TagsUpdateRequest(BaseModel):
@@ -90,6 +93,18 @@ def clean_unique_strings(values: list[str]) -> list[str]:
         for value in dict.fromkeys(value.strip() for value in values)
         if value
     ]
+
+
+def clean_login_values(payload: LoginRequest) -> tuple[str, str]:
+    username = payload.username.strip()
+    email = payload.email.strip().lower()
+
+    if not username:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Username is required")
+    if not EMAIL_RE.match(email):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter a valid email address")
+
+    return username, email
 
 
 def session_cookie_secure() -> bool:
@@ -482,12 +497,20 @@ def login(
     response: Response,
     conn: Annotated[psycopg.Connection, Depends(get_db)],
 ) -> dict:
+    username, email = clean_login_values(payload)
+
     with conn.cursor() as cur:
-        cur.execute("SELECT id, email, username FROM users WHERE email = %s", [payload.email])
+        cur.execute("SELECT id, email, username FROM users WHERE email = %s", [email])
         user = cur.fetchone()
 
         if user is None:
-            user_id = "demo-" + payload.email.lower().replace("@", "-").replace(".", "-")
+            if not payload.create_account:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No account exists for this email. Create a new account?",
+                )
+
+            user_id = "demo-" + email.replace("@", "-").replace(".", "-")
             cur.execute(
                 """
                 INSERT INTO users (id, email, username)
@@ -495,20 +518,14 @@ def login(
                 ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
                 RETURNING id, email, username
                 """,
-                [user_id, payload.email, payload.username],
+                [user_id, email, username],
             )
             user = cur.fetchone()
-        elif payload.username.strip():
-            cur.execute(
-                """
-                UPDATE users
-                SET username = %s
-                WHERE id = %s
-                RETURNING id, email, username
-                """,
-                [payload.username.strip(), user["id"]],
+        elif user["username"] != username:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Username does not match this email",
             )
-            user = cur.fetchone()
 
         token = create_session(cur, user["id"])
         set_session_cookie(response, token)

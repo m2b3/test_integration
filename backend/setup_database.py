@@ -25,9 +25,9 @@ except ImportError as exc:
 
 
 USERS = [
-    {"id": "user-1", "email": "u1@example.com", "username": "User One"},
-    {"id": "user-2", "email": "u2@example.com", "username": "User Two"},
-    {"id": "user-3", "email": "u3@example.com", "username": "User Three"},
+    {"id": "user-1", "email": "u1@example.com", "username": "u1"},
+    {"id": "user-2", "email": "u2@example.com", "username": "u2"},
+    {"id": "user-3", "email": "u3@example.com", "username": "u3"},
 ]
 
 TAGS = [

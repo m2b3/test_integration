@@ -22,7 +22,10 @@ function ProfilePage({ onBack, onLogout, onManageInterests, onRecentlyViewed, pr
         <button type="button" onClick={onManageInterests}>
           Manage interests
         </button>
-        <button type="button" onClick={onLogout}>
+      </div>
+
+      <div className="profile-footer">
+        <button className="logout-button" type="button" onClick={onLogout}>
           Log out
         </button>
       </div>

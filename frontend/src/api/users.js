@@ -1,9 +1,13 @@
 import { requestJson } from './client'
 
-export async function login({ username = 'Demo User', email }) {
+export async function login({ username, email, createAccount = false }) {
   return requestJson('/login', {
     method: 'POST',
-    body: JSON.stringify({ username, email }),
+    body: JSON.stringify({
+      username,
+      email,
+      create_account: createAccount,
+    }),
   })
 }
 

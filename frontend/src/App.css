@@ -501,6 +501,29 @@ select:focus {
   border-color: var(--accent);
 }
 
+.profile-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+}
+
+.logout-button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
+.logout-button:hover {
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+
 .page-heading {
   margin: 18px 0 14px;
 }
@@ -559,6 +582,26 @@ select:focus {
   display: grid;
   gap: 12px;
   grid-template-columns: 1fr 1fr;
+}
+
+.form-error {
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 12px 0 0;
+}
+
+.create-account-prompt {
+  background: color-mix(in srgb, #fef2f2 82%, var(--surface));
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.create-account-prompt p {
+  color: var(--text-strong);
+  margin: 0 0 10px;
 }
 
 .profile-match {

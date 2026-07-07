@@ -27,6 +27,25 @@ credentials included, then use `GET /me` on refresh to verify the active user.
 The frontend may cache the last profile and UI filters in local storage for a
 faster remembered UI, but Postgres/session state remains the source of truth.
 
+Login request:
+
+```json
+{
+  "username": "u1",
+  "email": "u1@example.com",
+  "create_account": false
+}
+```
+
+Rules:
+
+```text
+username and email are required
+email must be valid
+existing email requires matching username
+unknown email returns 404 unless create_account=true
+```
+
 ## Feed Endpoints
 
 The frontend has two main feed modes:

@@ -47,3 +47,6 @@ DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons uvicor
 `POST /login` creates a row in `user_sessions` and sets an HTTP-only
 `scicommons_session` cookie. User-specific endpoints require that session cookie
 to match the requested user.
+
+Existing-account login requires both username and email to match. Unknown
+emails are only created when the request includes `create_account: true`.

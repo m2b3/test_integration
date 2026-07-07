@@ -11,7 +11,14 @@ export async function requestJson(path, options = {}) {
   })
 
   if (!response.ok) {
-    const message = await response.text()
+    const responseText = await response.text()
+    let message
+    try {
+      const parsed = JSON.parse(responseText)
+      message = parsed.detail || responseText
+    } catch {
+      message = responseText
+    }
     const error = new Error(message || `API request failed: ${response.status}`)
     error.status = response.status
     throw error

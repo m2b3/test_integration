@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import InterestInput from './InterestInput'
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function authorsToText(authors) {
   if (Array.isArray(authors)) {
     return authors.join(', ')
@@ -8,23 +10,72 @@ function authorsToText(authors) {
   return authors || ''
 }
 
-function ProfileModal({ initialProfile, onClose, onSave }) {
-  const [step, setStep] = useState(initialProfile ? 'interests' : 'account')
+function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
+  const [step, setStep] = useState('account')
   const [username, setUsername] = useState(initialProfile?.username || '')
   const [email, setEmail] = useState(initialProfile?.email || '')
   const [tags, setTags] = useState(initialProfile?.tags || [])
   const [authors, setAuthors] = useState(() => authorsToText(initialProfile?.authors))
+  const [createdProfile, setCreatedProfile] = useState(null)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [showCreatePrompt, setShowCreatePrompt] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  function validateAccountFields() {
+    if (!username.trim()) {
+      return 'Username is required.'
+    }
+    if (!EMAIL_RE.test(email.trim())) {
+      return 'Enter a valid email address.'
+    }
+    return ''
+  }
+
+  async function submitAccount(createAccount = false) {
+    const validationError = validateAccountFields()
+    if (validationError) {
+      setErrorMessage(validationError)
+      return
+    }
+
+    setIsSubmitting(true)
+    setErrorMessage('')
+
+    try {
+      const profile = await onLogin({
+        username: username.trim(),
+        email: email.trim(),
+        createAccount,
+      })
+
+      if (createAccount) {
+        setCreatedProfile(profile)
+        setTags(profile.tags || [])
+        setAuthors(authorsToText(profile.authors))
+        setShowCreatePrompt(false)
+        setStep('interests')
+      }
+    } catch (error) {
+      if (error.status === 404 && !createAccount) {
+        setShowCreatePrompt(true)
+        setErrorMessage(error.message)
+      } else {
+        setErrorMessage(error.message || 'Could not log in.')
+      }
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
 
   function handleAccountSubmit(event) {
     event.preventDefault()
-    setStep('interests')
+    submitAccount(false)
   }
 
   function handleInterestSubmit(event) {
     event.preventDefault()
-    onSave({
-      username: username.trim() || 'Demo User',
-      email: email.trim() || 'demo@example.com',
+    onSaveInterests({
+      ...createdProfile,
       tags,
       authors: authors.trim(),
     })
@@ -66,12 +117,40 @@ function ProfileModal({ initialProfile, onClose, onSave }) {
               </label>
             </div>
 
+            {errorMessage && <p className="form-error">{errorMessage}</p>}
+
+            {showCreatePrompt && (
+              <div className="create-account-prompt">
+                <p>This email does not exist yet. Create a new user with this username and email?</p>
+                <div className="modal-actions">
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => {
+                      setShowCreatePrompt(false)
+                      setErrorMessage('')
+                    }}
+                  >
+                    Not now
+                  </button>
+                  <button
+                    className="primary-button"
+                    disabled={isSubmitting}
+                    type="button"
+                    onClick={() => submitAccount(true)}
+                  >
+                    Create user
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={onClose}>
                 Cancel
               </button>
-              <button className="primary-button" type="submit">
-                Continue
+              <button className="primary-button" disabled={isSubmitting} type="submit">
+                Log in
               </button>
             </div>
           </form>
@@ -90,11 +169,9 @@ function ProfileModal({ initialProfile, onClose, onSave }) {
             </label>
 
             <div className="modal-actions">
-              {!initialProfile && (
-                <button className="secondary-button" type="button" onClick={() => setStep('account')}>
-                  Back
-                </button>
-              )}
+              <button className="secondary-button" type="button" onClick={() => setStep('account')}>
+                Back
+              </button>
               <button className="primary-button" type="submit">
                 Save interests
               </button>
