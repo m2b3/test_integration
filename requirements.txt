@@ -9,3 +9,7 @@ openreview-py>=2.2.0
 numpy==2.4.4
 sentence-transformers>=3.0.0
 faiss-cpu>=1.13.0
+
+# Article/search HTTP API
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0

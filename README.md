@@ -93,6 +93,67 @@ The combined paper build produces:
 
 Papers without enough usable title/abstract text remain in `all.sqlite` but are skipped by the FAISS and FTS5 indexes.
 
+## Article/search API
+
+The API wraps the daily artifacts produced by `pipeline.py` and keeps them
+loaded for request-time use. Run the daily pipeline first so `all.sqlite`,
+`all_specter.index`, `all_metadata.json`, and `all_manifest.json` exist.
+
+Install dependencies, then start the service from this repo root:
+
+```bash
+python -m pip install -r requirements.txt
+uvicorn article_service.main:app --host 0.0.0.0 --port 8100
+```
+
+If artifacts live outside the repo root, point the service at that directory:
+
+```bash
+SCICOMM_ARTIFACT_DIR=/path/to/artifacts \
+uvicorn article_service.main:app --host 0.0.0.0 --port 8100
+```
+
+The service reloads artifacts automatically when the pipeline atomically
+replaces them.
+
+Useful endpoints:
+
+```text
+GET /health
+GET /sources
+GET /manifest
+GET /articles?source=all&limit=50
+GET /articles?source=arxiv&limit=50
+GET /search?search_mode=semantic&semantic_query=mechanistic+interpretability&source=all
+GET /search?search_mode=keyword&keyword_query=Monte+Carlo+tree+search&source=arxiv
+GET /search?search_mode=hybrid&semantic_query=language+model+planning&keyword_query=MCTS&source=all
+```
+
+`source=all` searches all indexed papers. Any other source value, such as
+`arxiv`, `pubmed`, `biorxiv`, `medrxiv`, `psyarxiv`, or `socarxiv`, filters
+results to that source. The current implementation retrieves a candidate pool
+from the combined artifacts and filters by source before returning results.
+Increase `pool_size` when filtering to a source and asking for many results.
+
+The response article shape is designed for the Scicommons web backend:
+
+```json
+{
+  "id": "arxiv:2401.12345",
+  "paper_key": "arxiv:2401.12345",
+  "source": "arxiv",
+  "external_id": "2401.12345",
+  "title": "Example title",
+  "authors": "A. Smith, B. Lee",
+  "url": "https://arxiv.org/abs/2401.12345",
+  "pdf_url": "https://arxiv.org/pdf/2401.12345",
+  "published_date": "2026-07-08",
+  "abstract": "...",
+  "tags": ["cs.AI"],
+  "score": 0.83
+}
+```
+
 ## Build and search indexes directly
 
 `All_embedding.py` is the merge, indexing, and retrieval tool.
