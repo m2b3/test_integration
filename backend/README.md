@@ -1,6 +1,6 @@
 # Scicommons Backend
 
-Prototype FastAPI backend for the Scicommons frontend.
+FastAPI backend for Scicommons user/session/profile APIs and article-service proxying.
 
 ## Local Setup
 
@@ -25,14 +25,20 @@ python3 -m pip install -r requirements.txt
 Run the API:
 
 ```bash
-DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons uvicorn app.main:app --reload --port 8000
+DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons \
+ARTICLE_SERVICE_BASE_URL=http://localhost:8100 \
+uvicorn app.main:app --reload --port 8000
 ```
+
+`ARTICLE_SERVICE_BASE_URL` should point to the article/search API in the
+`scicomm_embedding` repo.
 
 ## Endpoints
 
 - `GET /health`
 - `GET /tags`
-- `GET /articles?tags=biology,chemistry&match=or&source=all`
+- `GET /sources`
+- `GET /articles?semantic_query=biology&source=all`
 - `GET /users/{user_id}/feed`
 - `GET /users/{user_id}/tags`
 - `GET /users/{user_id}/profile`

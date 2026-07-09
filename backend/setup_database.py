@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Create and seed the Scicommons prototype database.
+Create and seed the Scicommons user/session database.
 
 Usage:
   DATABASE_URL="postgresql://user:password@host:5432/scicommons" python setup_database.py
 
-The script intentionally drops and recreates the prototype tables on every run.
+The script intentionally drops and recreates the current user-side tables on every run.
 It does not create the database itself; create an empty Postgres database first,
 then run this script against it.
 """
@@ -49,107 +49,6 @@ USER_AUTHORS = [
     {"user_id": "user-1", "author_name": "bio author"},
     {"user_id": "user-3", "author_name": "chem author"},
 ]
-
-ARTICLES = [
-    {
-        "id": "article-1",
-        "title": "bio paper",
-        "authors": "bio author",
-        "source": "pubmed",
-        "url": "",
-        "published_date": "2026-06-26",
-        "abstract": "asdf biology mock abstract text",
-    },
-    {
-        "id": "article-2",
-        "title": "machine learning paper",
-        "authors": "machine learning author",
-        "source": "arxiv",
-        "url": "",
-        "published_date": "2026-06-26",
-        "abstract": "asdf machine learning mock abstract text",
-    },
-    {
-        "id": "article-3",
-        "title": "chemistry paper",
-        "authors": "chem author",
-        "source": "pubmed",
-        "url": "",
-        "published_date": "2026-06-26",
-        "abstract": "asdf chemistry mock abstract text",
-    },
-    {
-        "id": "article-4",
-        "title": "medicine paper",
-        "authors": "medicine author",
-        "source": "pubmed",
-        "url": "",
-        "published_date": "2026-06-26",
-        "abstract": "asdf medicine mock abstract text",
-    },
-    {
-        "id": "article-5",
-        "title": "physics paper",
-        "authors": "physics author",
-        "source": "arxiv",
-        "url": "",
-        "published_date": "2026-06-26",
-        "abstract": "asdf physics mock abstract text",
-    },
-    {
-        "id": "article-6",
-        "title": "chem and bio paper",
-        "authors": "chem author, bio author",
-        "source": "arxiv",
-        "url": "test text",
-        "published_date": "2026-06-26",
-        "abstract": "asdf chemistry biology mock abstract text",
-    },
-    {
-        "id": "article-7",
-        "title": "bio and machine learning paper",
-        "authors": "bio author, machine learning author",
-        "source": "arxiv",
-        "url": "test text",
-        "published_date": "2026-06-26",
-        "abstract": "asdf biology machine learning mock abstract text",
-    },
-    {
-        "id": "article-8",
-        "title": "medicine and chemistry paper",
-        "authors": "medicine author, chem author",
-        "source": "pubmed",
-        "url": "test text",
-        "published_date": "2026-06-26",
-        "abstract": "asdf medicine chemistry mock abstract text",
-    },
-]
-
-ARTICLE_TAGS = [
-    {"article_id": "article-1", "tag_id": "biology"},
-    {"article_id": "article-2", "tag_id": "machine-learning"},
-    {"article_id": "article-3", "tag_id": "chemistry"},
-    {"article_id": "article-4", "tag_id": "medicine"},
-    {"article_id": "article-5", "tag_id": "physics"},
-    {"article_id": "article-6", "tag_id": "chemistry"},
-    {"article_id": "article-6", "tag_id": "biology"},
-    {"article_id": "article-7", "tag_id": "biology"},
-    {"article_id": "article-7", "tag_id": "machine-learning"},
-    {"article_id": "article-8", "tag_id": "medicine"},
-    {"article_id": "article-8", "tag_id": "chemistry"},
-]
-
-USER_DAILY_FEED = [
-    {"user_id": "user-1", "article_id": "article-1", "feed_date": "2026-06-26"},
-    {"user_id": "user-1", "article_id": "article-6", "feed_date": "2026-06-26"},
-    {"user_id": "user-1", "article_id": "article-7", "feed_date": "2026-06-26"},
-    {"user_id": "user-2", "article_id": "article-2", "feed_date": "2026-06-26"},
-    {"user_id": "user-2", "article_id": "article-7", "feed_date": "2026-06-26"},
-    {"user_id": "user-3", "article_id": "article-3", "feed_date": "2026-06-26"},
-    {"user_id": "user-3", "article_id": "article-6", "feed_date": "2026-06-26"},
-    {"user_id": "user-3", "article_id": "article-8", "feed_date": "2026-06-26"},
-]
-
 
 DROP_TABLES_SQL = """
 DROP TABLE IF EXISTS user_sessions;
@@ -198,29 +97,6 @@ CREATE TABLE user_sessions (
     expires_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE articles (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    authors TEXT NOT NULL,
-    source TEXT NOT NULL,
-    url TEXT NOT NULL DEFAULT '',
-    published_date DATE NOT NULL,
-    abstract TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE article_tags (
-    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-    PRIMARY KEY (article_id, tag_id)
-);
-
-CREATE TABLE user_daily_feed (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
-    feed_date DATE NOT NULL,
-    PRIMARY KEY (user_id, article_id, feed_date)
-);
-
 CREATE TABLE user_recently_viewed (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     article_key TEXT NOT NULL,
@@ -240,10 +116,6 @@ CREATE INDEX idx_user_tags_tag_id ON user_tags(tag_id);
 CREATE INDEX idx_user_authors_author_name ON user_authors(author_name);
 CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
-CREATE INDEX idx_article_tags_tag_id ON article_tags(tag_id);
-CREATE INDEX idx_articles_published_date ON articles(published_date);
-CREATE INDEX idx_articles_source ON articles(source);
-CREATE INDEX idx_user_daily_feed_date ON user_daily_feed(feed_date);
 CREATE INDEX idx_user_recently_viewed_viewed_at ON user_recently_viewed(user_id, viewed_at DESC);
 """
 
@@ -280,17 +152,9 @@ def main() -> int:
             insert_rows(cur, "tags", ["id", "name"], TAGS)
             insert_rows(cur, "user_tags", ["user_id", "tag_id"], USER_TAGS)
             insert_rows(cur, "user_authors", ["user_id", "author_name"], USER_AUTHORS)
-            insert_rows(
-                cur,
-                "articles",
-                ["id", "title", "authors", "source", "url", "published_date", "abstract"],
-                ARTICLES,
-            )
-            insert_rows(cur, "article_tags", ["article_id", "tag_id"], ARTICLE_TAGS)
-            insert_rows(cur, "user_daily_feed", ["user_id", "article_id", "feed_date"], USER_DAILY_FEED)
 
     print("Database tables recreated and seeded.")
-    print(f"Inserted {len(USERS)} users, {len(TAGS)} tags, and {len(ARTICLES)} articles.")
+    print(f"Inserted {len(USERS)} users and {len(TAGS)} tags.")
     return 0
 
 

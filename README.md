@@ -60,6 +60,7 @@ cd ~/test_integration/backend
 source .venv/bin/activate
 
 DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons \
+ARTICLE_SERVICE_BASE_URL=http://localhost:8100 \
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -128,6 +129,7 @@ In the first tmux window, run the backend:
 cd ~/test_integration/backend
 source .venv/bin/activate
 DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons \
+ARTICLE_SERVICE_BASE_URL=http://localhost:8100 \
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -170,7 +172,7 @@ GET  /health
 GET  /tags
 GET  /sources
 GET  /articles
-GET  /articles?tags=biology,chemistry&match=or
+GET  /articles?semantic_query=biology&source=arxiv
 GET  /users/{user_id}/feed
 GET  /users/{user_id}/profile
 PUT  /users/{user_id}/profile
@@ -186,8 +188,10 @@ PUT  /users/{user_id}/tags
 ## Notes
 
 - Backend runs on port `8000`.
+- Article/search service from `scicomm_embedding` runs on port `8100` by default.
 - Frontend dev server runs on port `5173`.
 - Postgres runs on local port `5432`.
 - Frontend `.env` is intentionally not committed; recreate it on each server.
 - User login/session/profile/interests/recently viewed are stored through the backend and Postgres. The browser also keeps a non-authoritative cache of the last profile and source filter so refreshes feel remembered; `/me` verifies the session and refreshes profile data from the DB.
-- This is a prototype deployment. Later, frontend/backend/database can be separated if needed.
+- Article listing/search is proxied through `ARTICLE_SERVICE_BASE_URL`; Postgres is not the source of article records.
+- Frontend, user backend, Postgres, and article/search service can run together for now; they can be split across servers once deployment requirements are clearer.

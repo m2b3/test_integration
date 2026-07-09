@@ -21,6 +21,13 @@ POST /logout
 PUT  /users/{user_id}/tags
 ```
 
+Article endpoints are implemented by proxying to the article/search API from
+the `scicomm_embedding` repo. Configure the backend with:
+
+```text
+ARTICLE_SERVICE_BASE_URL=http://localhost:8100
+```
+
 `POST /login` creates a backend session in `user_sessions` and sets an HTTP-only
 `scicommons_session` cookie. The frontend should send API requests with
 credentials included, then use `GET /me` on refresh to verify the active user.
@@ -72,7 +79,7 @@ GET /articles
 Shared query params:
 
 ```text
-source=all|arxiv|pubmed
+source=all|arxiv|pubmed|biorxiv|medrxiv|psyarxiv|socarxiv
 semantic_query=<free text>
 keyword_query=<free text>
 search_mode=none|semantic|keyword|hybrid
@@ -88,8 +95,9 @@ both filled         -> hybrid
 neither filled      -> none
 ```
 
-Current backend accepts the extra search params but still returns simple SQL-filtered feed data.
-Later, these params should route into the embedding/search pipeline.
+The backend forwards these params to the article/search service. Recommended
+feed uses the user's saved interests/authors as a semantic query when the
+frontend has not provided an explicit search.
 
 ## User Interests
 

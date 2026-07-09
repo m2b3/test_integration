@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 import re
 import secrets
 from datetime import date
 from typing import Annotated, Literal
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest
+from urllib.request import urlopen
 
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
@@ -15,6 +20,7 @@ from pydantic import BaseModel
 
 
 DEFAULT_DATABASE_URL = "postgresql://scicommons:scicommons@localhost:5432/scicommons"
+DEFAULT_ARTICLE_SERVICE_BASE_URL = "http://localhost:8100"
 MatchMode = Literal["and", "or"]
 SESSION_COOKIE_NAME = "scicommons_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
@@ -76,6 +82,10 @@ def database_url() -> str:
     return os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
+def article_service_base_url() -> str:
+    return os.getenv("ARTICLE_SERVICE_BASE_URL", DEFAULT_ARTICLE_SERVICE_BASE_URL).rstrip("/")
+
+
 def get_db():
     with psycopg.connect(database_url(), row_factory=dict_row) as conn:
         yield conn
@@ -85,6 +95,65 @@ def parse_tags(tags: str | None) -> list[str]:
     if not tags:
         return []
     return [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+
+def parse_article_service_error(exc: HTTPError) -> str:
+    body = exc.read().decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return body or exc.reason
+    return str(parsed.get("detail") or body or exc.reason)
+
+
+def article_service_get(path: str, params: dict[str, object]) -> object:
+    clean_params = {
+        key: value
+        for key, value in params.items()
+        if value is not None and value != "" and value != "none"
+    }
+    query = urlencode(clean_params)
+    url = f"{article_service_base_url()}{path}"
+    if query:
+        url = f"{url}?{query}"
+
+    request = UrlRequest(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        raise HTTPException(status_code=exc.code, detail=parse_article_service_error(exc)) from exc
+    except URLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Article service unavailable: {exc.reason}",
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Article service returned invalid JSON",
+        ) from exc
+
+
+def article_service_params(
+    *,
+    source: str,
+    q: str,
+    semantic_query: str,
+    keyword_query: str,
+    search_mode: str,
+    date_filter: date | None,
+    limit: int,
+) -> dict[str, object]:
+    effective_keyword_query = keyword_query.strip() or q.strip()
+    return {
+        "source": source,
+        "semantic_query": semantic_query.strip(),
+        "keyword_query": effective_keyword_query,
+        "search_mode": search_mode,
+        "date": date_filter.isoformat() if date_filter is not None else None,
+        "limit": limit,
+    }
 
 
 def clean_unique_strings(values: list[str]) -> list[str]:
@@ -176,17 +245,6 @@ def require_user_session(request: Request, cur: psycopg.Cursor, user_id: str) ->
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another user")
 
 
-def normalize_article(row: dict) -> dict:
-    return {
-        **row,
-        "paper_key": row["id"],
-        "published_date": row["published_date"].isoformat()
-        if hasattr(row["published_date"], "isoformat")
-        else row["published_date"],
-        "tags": row["tags"] or [],
-    }
-
-
 def normalize_recently_viewed(row: dict) -> dict:
     return {
         "id": row["article_key"],
@@ -242,6 +300,12 @@ def get_profile(cur: psycopg.Cursor, user_id: str) -> dict:
     }
 
 
+def user_recommendation_query(cur: psycopg.Cursor, user_id: str) -> str:
+    profile = get_profile(cur, user_id)
+    values = [*profile["tags"], *profile["authors"]]
+    return " ".join(clean_unique_strings(values))
+
+
 def replace_user_tags(cur: psycopg.Cursor, user_id: str, tags: list[str]) -> list[str]:
     unique_tags = clean_unique_strings(tags)
 
@@ -281,99 +345,6 @@ def replace_user_authors(cur: psycopg.Cursor, user_id: str, authors: list[str]) 
     return unique_authors
 
 
-def article_query(
-    *,
-    user_id: str | None = None,
-    tags: list[str] | None = None,
-    match: MatchMode = "or",
-    source: str = "all",
-    q: str = "",
-    article_date: date | None = None,
-) -> tuple[str, list[object]]:
-    selected_tags = tags or []
-    params: list[object] = []
-    where_clauses: list[str] = []
-    joins = ""
-
-    if user_id is not None:
-        joins += "JOIN user_daily_feed udf ON udf.article_id = a.id "
-        where_clauses.append("udf.user_id = %s")
-        params.append(user_id)
-        if article_date is not None:
-            where_clauses.append("udf.feed_date = %s")
-            params.append(article_date)
-
-    if article_date is not None and user_id is None:
-        where_clauses.append("a.published_date = %s")
-        params.append(article_date)
-
-    if source != "all":
-        where_clauses.append("a.source = %s")
-        params.append(source)
-
-    if q.strip():
-        where_clauses.append("(a.title ILIKE %s OR a.authors ILIKE %s)")
-        search = f"%{q.strip()}%"
-        params.extend([search, search])
-
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    tag_filter_sql = ""
-
-    if selected_tags:
-        if match == "and":
-            tag_filter_sql = "WHERE %s::text[] <@ tags"
-        else:
-            tag_filter_sql = "WHERE %s::text[] && tags"
-        params.append(selected_tags)
-
-    sql = f"""
-        WITH article_rows AS (
-            SELECT DISTINCT
-                a.id,
-                a.title,
-                a.authors,
-                a.source,
-                a.url,
-                a.published_date,
-                a.abstract
-            FROM articles a
-            {joins}
-            {where_sql}
-        ),
-        tagged AS (
-            SELECT
-                ar.id,
-                ar.title,
-                ar.authors,
-                ar.source,
-                ar.url,
-                ar.published_date,
-                ar.abstract,
-                COALESCE(
-                    array_agg(at.tag_id ORDER BY at.tag_id)
-                    FILTER (WHERE at.tag_id IS NOT NULL),
-                    '{{}}'
-                ) AS tags
-            FROM article_rows ar
-            LEFT JOIN article_tags at ON at.article_id = ar.id
-            GROUP BY
-                ar.id,
-                ar.title,
-                ar.authors,
-                ar.source,
-                ar.url,
-                ar.published_date,
-                ar.abstract
-        )
-        SELECT *
-        FROM tagged
-        {tag_filter_sql}
-        ORDER BY published_date DESC, id ASC
-    """
-
-    return sql, params
-
-
 @app.get("/health")
 def health(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> dict:
     with conn.cursor() as cur:
@@ -390,9 +361,9 @@ def get_tags(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[dict]
             SELECT
                 t.id,
                 t.name,
-                COUNT(at.article_id)::int AS count
+                COUNT(ut.user_id)::int AS count
             FROM tags t
-            LEFT JOIN article_tags at ON at.tag_id = t.id
+            LEFT JOIN user_tags ut ON ut.tag_id = t.id
             GROUP BY t.id, t.name
             ORDER BY t.name ASC
             """
@@ -401,31 +372,36 @@ def get_tags(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[dict]
 
 
 @app.get("/sources")
-def get_sources(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[str]:
-    with conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT source FROM articles ORDER BY source ASC")
-        return [row["source"] for row in cur.fetchall()]
+def get_sources() -> list[str]:
+    return article_service_get("/sources", {})  # type: ignore[return-value]
 
 
 @app.get("/articles")
 def get_articles(
-    conn: Annotated[psycopg.Connection, Depends(get_db)],
     tags: str | None = None,
     match: MatchMode = "or",
     source: str = "all",
     q: str = "",
+    semantic_query: str = "",
+    keyword_query: str = "",
+    search_mode: str = "auto",
+    limit: int = Query(default=50, ge=1, le=200),
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
-    sql, params = article_query(
-        tags=parse_tags(tags),
-        match=match,
+    tag_query = " ".join(parse_tags(tags))
+    effective_semantic_query = semantic_query.strip() or tag_query
+    params = article_service_params(
         source=source,
         q=q,
-        article_date=date_filter,
+        semantic_query=effective_semantic_query,
+        keyword_query=keyword_query,
+        search_mode=search_mode,
+        date_filter=date_filter,
+        limit=limit,
     )
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-        return [normalize_article(row) for row in cur.fetchall()]
+    if tags and search_mode == "auto":
+        params["search_mode"] = "semantic"
+    return article_service_get("/articles", params)  # type: ignore[return-value]
 
 
 @app.get("/users/{user_id}/feed")
@@ -437,22 +413,36 @@ def get_user_feed(
     match: MatchMode = "or",
     source: str = "all",
     q: str = "",
+    semantic_query: str = "",
+    keyword_query: str = "",
+    search_mode: str = "auto",
+    limit: int = Query(default=50, ge=1, le=200),
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
     with conn.cursor() as cur:
         require_user_session(request, cur, user_id)
+        recommendation_query = user_recommendation_query(cur, user_id)
 
-    sql, params = article_query(
-        user_id=user_id,
-        tags=parse_tags(tags),
-        match=match,
+    explicit_query = bool(semantic_query.strip() or keyword_query.strip() or q.strip() or parse_tags(tags))
+    effective_semantic_query = semantic_query.strip()
+    if not explicit_query and recommendation_query:
+        effective_semantic_query = recommendation_query
+        search_mode = "semantic"
+    elif tags and not effective_semantic_query:
+        effective_semantic_query = " ".join(parse_tags(tags))
+        if search_mode == "auto":
+            search_mode = "semantic"
+
+    params = article_service_params(
         source=source,
         q=q,
-        article_date=date_filter,
+        semantic_query=effective_semantic_query,
+        keyword_query=keyword_query,
+        search_mode=search_mode,
+        date_filter=date_filter,
+        limit=limit,
     )
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-        return [normalize_article(row) for row in cur.fetchall()]
+    return article_service_get("/articles", params)  # type: ignore[return-value]
 
 
 @app.get("/users/{user_id}/tags")
