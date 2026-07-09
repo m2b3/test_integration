@@ -84,6 +84,8 @@ semantic_query=<free text>
 keyword_query=<free text>
 search_mode=none|semantic|keyword|hybrid
 date=YYYY-MM-DD
+limit=<page size>
+offset=<starting row>
 ```
 
 Frontend search mode rule:

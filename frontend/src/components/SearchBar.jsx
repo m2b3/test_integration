@@ -8,13 +8,19 @@ function SearchBar({
   keywordQuery,
   onKeywordQueryChange,
   onSemanticQueryChange,
+  onSearch,
   onSourceChange,
   searchMode,
   semanticQuery,
   source,
 }) {
+  function handleSubmit(event) {
+    event.preventDefault()
+    onSearch()
+  }
+
   return (
-    <section className="search-panel" aria-label="Article search">
+    <form className="search-panel" aria-label="Article search" onSubmit={handleSubmit}>
       <div className="search-grid">
         <label className="field">
           <span>Semantic</span>
@@ -50,9 +56,14 @@ function SearchBar({
             </button>
           ))}
         </div>
-        <span className="search-mode">Mode: {searchMode}</span>
+        <div className="search-actions">
+          <span className="search-mode">Mode: {searchMode}</span>
+          <button className="primary-button compact-button" type="submit">
+            Search
+          </button>
+        </div>
       </div>
-    </section>
+    </form>
   )
 }
 

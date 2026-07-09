@@ -110,7 +110,7 @@ def article_service_get(path: str, params: dict[str, object]) -> object:
     clean_params = {
         key: value
         for key, value in params.items()
-        if value is not None and value != "" and value != "none"
+        if value is not None and value != ""
     }
     query = urlencode(clean_params)
     url = f"{article_service_base_url()}{path}"
@@ -144,6 +144,7 @@ def article_service_params(
     search_mode: str,
     date_filter: date | None,
     limit: int,
+    offset: int,
 ) -> dict[str, object]:
     effective_keyword_query = keyword_query.strip() or q.strip()
     return {
@@ -153,6 +154,7 @@ def article_service_params(
         "search_mode": search_mode,
         "date": date_filter.isoformat() if date_filter is not None else None,
         "limit": limit,
+        "offset": offset,
     }
 
 
@@ -386,6 +388,7 @@ def get_articles(
     keyword_query: str = "",
     search_mode: str = "auto",
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
     tag_query = " ".join(parse_tags(tags))
@@ -398,6 +401,7 @@ def get_articles(
         search_mode=search_mode,
         date_filter=date_filter,
         limit=limit,
+        offset=offset,
     )
     if tags and search_mode == "auto":
         params["search_mode"] = "semantic"
@@ -417,6 +421,7 @@ def get_user_feed(
     keyword_query: str = "",
     search_mode: str = "auto",
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
     with conn.cursor() as cur:
@@ -441,6 +446,7 @@ def get_user_feed(
         search_mode=search_mode,
         date_filter=date_filter,
         limit=limit,
+        offset=offset,
     )
     return article_service_get("/articles", params)  # type: ignore[return-value]
 

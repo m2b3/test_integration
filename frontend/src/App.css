@@ -228,6 +228,17 @@ select {
   text-transform: capitalize;
 }
 
+.search-actions {
+  align-items: center;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 6px 12px;
+}
+
 input:focus,
 select:focus {
   border-color: var(--accent);
@@ -324,6 +335,15 @@ select:focus {
 .article-list {
   display: grid;
   gap: 12px;
+}
+
+.feed-loader {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 32px;
+  padding: 4px 0 8px;
+  text-align: center;
 }
 
 .article-card {

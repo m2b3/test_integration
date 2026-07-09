@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getArticles, getUserFeed } from './api/articles'
 import {
   addRecentlyViewed,
@@ -21,6 +21,7 @@ import './App.css'
 const PROFILE_CACHE_KEY = 'scicommons.cachedProfile'
 const SOURCE_FILTER_KEY = 'scicommons.sourceFilter'
 const SOURCE_VALUES = new Set(['all', 'arxiv', 'pubmed'])
+const ARTICLE_PAGE_SIZE = 50
 
 function readJsonCache(key) {
   try {
@@ -48,18 +49,32 @@ function App() {
   const [articles, setArticles] = useState([])
   const [recentlyViewed, setRecentlyViewed] = useState([])
   const [isLoading, setIsLoading] = useState(true)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [isSessionLoading, setIsSessionLoading] = useState(true)
+  const [hasMoreArticles, setHasMoreArticles] = useState(true)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
+  const [submittedSemanticQuery, setSubmittedSemanticQuery] = useState('')
+  const [submittedKeywordQuery, setSubmittedKeywordQuery] = useState('')
   const [source, setSource] = useState(() => readSourceFilter())
   const [profile, setProfile] = useState(() => readJsonCache(PROFILE_CACHE_KEY))
   const [activeFeed, setActiveFeed] = useState(() => (readJsonCache(PROFILE_CACHE_KEY) ? 'recommended' : 'all'))
   const [activePage, setActivePage] = useState('feed')
   const [selectedArticle, setSelectedArticle] = useState(null)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
+  const loadMoreRef = useRef(null)
   const profileName = profile?.username || profile?.email || 'User'
 
   const searchMode =
+    submittedSemanticQuery.trim() && submittedKeywordQuery.trim()
+      ? 'hybrid'
+      : submittedSemanticQuery.trim()
+        ? 'semantic'
+        : submittedKeywordQuery.trim()
+          ? 'keyword'
+          : 'none'
+
+  const visibleSearchMode =
     semanticQuery.trim() && keywordQuery.trim()
       ? 'hybrid'
       : semanticQuery.trim()
@@ -106,6 +121,32 @@ function App() {
     window.localStorage.setItem(SOURCE_FILTER_KEY, source)
   }, [source])
 
+  const loadArticlePage = useCallback(
+    async ({ offset, replace }) => {
+      const filters = {
+        semantic_query: submittedSemanticQuery,
+        keyword_query: submittedKeywordQuery,
+        search_mode: searchMode,
+        source,
+        limit: ARTICLE_PAGE_SIZE,
+        offset,
+      }
+
+      const nextArticles =
+        activeFeed === 'recommended' && profile
+          ? await getUserFeed(profile.user_id, filters)
+          : await getArticles(filters)
+
+      if (replace) {
+        setArticles(nextArticles)
+      } else {
+        setArticles((currentArticles) => [...currentArticles, ...nextArticles])
+      }
+      setHasMoreArticles(nextArticles.length === ARTICLE_PAGE_SIZE)
+    },
+    [activeFeed, profile, searchMode, source, submittedKeywordQuery, submittedSemanticQuery],
+  )
+
   useEffect(() => {
     let isActive = true
 
@@ -115,29 +156,28 @@ function App() {
       }
 
       setIsLoading(true)
-      const filters = {
-        semantic_query: semanticQuery,
-        keyword_query: keywordQuery,
-        search_mode: searchMode,
-        source,
-      }
       try {
-        const nextArticles =
-          activeFeed === 'recommended' && profile
-            ? await getUserFeed(profile.user_id, filters)
-            : await getArticles(filters)
-
         if (isActive) {
-          setArticles(nextArticles)
+          setHasMoreArticles(true)
         }
+
+        await loadArticlePage({ offset: 0, replace: true })
       } catch (error) {
         if (isActive && error.status === 401) {
           removeCache(PROFILE_CACHE_KEY)
           setProfile(null)
           setActiveFeed('all')
-          const publicArticles = await getArticles(filters)
+          const publicArticles = await getArticles({
+            semantic_query: submittedSemanticQuery,
+            keyword_query: submittedKeywordQuery,
+            search_mode: searchMode,
+            source,
+            limit: ARTICLE_PAGE_SIZE,
+            offset: 0,
+          })
           if (isActive) {
             setArticles(publicArticles)
+            setHasMoreArticles(publicArticles.length === ARTICLE_PAGE_SIZE)
           }
         } else {
           console.error(error)
@@ -154,7 +194,57 @@ function App() {
     return () => {
       isActive = false
     }
-  }, [activeFeed, isSessionLoading, keywordQuery, profile, searchMode, semanticQuery, source])
+  }, [
+    activeFeed,
+    isSessionLoading,
+    loadArticlePage,
+    profile,
+    searchMode,
+    source,
+    submittedKeywordQuery,
+    submittedSemanticQuery,
+  ])
+
+  const loadMoreArticles = useCallback(async () => {
+    if (isLoading || isLoadingMore || !hasMoreArticles || activePage !== 'feed') {
+      return
+    }
+
+    setIsLoadingMore(true)
+    try {
+      await loadArticlePage({ offset: articles.length, replace: false })
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }, [activePage, articles.length, hasMoreArticles, isLoading, isLoadingMore, loadArticlePage])
+
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !hasMoreArticles || isLoading || isLoadingMore || activePage !== 'feed') {
+      return undefined
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          loadMoreArticles()
+        }
+      },
+      { rootMargin: '600px 0px' },
+    )
+
+    observer.observe(target)
+    return () => {
+      observer.disconnect()
+    }
+  }, [activePage, hasMoreArticles, isLoading, isLoadingMore, loadMoreArticles])
+
+  function handleSearchSubmit() {
+    setSubmittedSemanticQuery(semanticQuery)
+    setSubmittedKeywordQuery(keywordQuery)
+  }
 
   async function handleProfileLogin(nextProfile) {
     const savedProfile = await login(nextProfile)
@@ -312,8 +402,9 @@ function App() {
           keywordQuery={keywordQuery}
           onKeywordQueryChange={setKeywordQuery}
           onSemanticQueryChange={setSemanticQuery}
+          onSearch={handleSearchSubmit}
           onSourceChange={setSource}
-          searchMode={searchMode}
+          searchMode={visibleSearchMode}
           semanticQuery={semanticQuery}
           source={source}
         />
@@ -340,6 +431,13 @@ function App() {
               <p>Try changing the search terms or source filter.</p>
             </div>
           )}
+
+          <div className="feed-loader" ref={loadMoreRef}>
+            {isLoadingMore && <span>Loading more articles</span>}
+            {!isLoading && !isLoadingMore && !hasMoreArticles && articles.length > 0 && (
+              <span>No more papers</span>
+            )}
+          </div>
         </div>
       </section>
     )

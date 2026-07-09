@@ -27,12 +27,20 @@ function buildArticleQuery(filters = {}) {
     params.set('keyword_query', filters.keyword_query)
   }
 
-  if (filters.search_mode && filters.search_mode !== 'none') {
+  if (filters.search_mode) {
     params.set('search_mode', filters.search_mode)
   }
 
   if (filters.date) {
     params.set('date', filters.date)
+  }
+
+  if (Number.isInteger(filters.limit)) {
+    params.set('limit', String(filters.limit))
+  }
+
+  if (Number.isInteger(filters.offset)) {
+    params.set('offset', String(filters.offset))
   }
 
   const query = params.toString()
