@@ -1,0 +1,132 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# generate-nlmnlp
+
+DoGeneRIFs() {
+
+  if [ ! -f "geneconv.xml" ] && [ -f "gene_info.gz" ]
+  then
+    gunzip -c gene_info.gz |
+    go run "${externBase}/${folder}/prep-geneinfo.go" > geneconv.xml
+  fi
+
+  if [ -f "geneconv.xml" ]
+  then
+    if [ ! -f "genename.txt" ]
+    then
+      echo "Building genename.txt" >&2
+
+      cat geneconv.xml |
+      xtract -pattern Rec -if Id -and Gene -element Id Gene |
+      sort-table -k 1,1n > genename.txt
+    fi
+
+    if [ ! -f "genesyns.txt" ]
+    then
+      echo "Building genesyns.txt" >&2
+
+      cat geneconv.xml |
+      xtract -pattern Rec -if Id -and Syns -element Id Syns |
+      sort-table -k 1,1n > genesyns.txt
+    fi
+  fi
+}
+
+DoBioconcepts() {
+
+  if [ ! -f "chemconv.xml" ]
+  then
+    rm -f chemtemp.xml
+    if [ -f "supp${year}.xml" ]
+    then
+      cat supp${year}.xml |
+      xtract -wrp "Set,Rec" -pattern SupplementalRecord \
+        -if "SupplementalRecord@SCRClass" -eq 1 \
+          -wrp "Code" -element "SupplementalRecord/SupplementalRecordUI" \
+          -wrp "Name" -encode "SupplementalRecordName/String" \
+          -wrp "Term" -encode "Term/String" > chemtemp.xml
+    fi
+
+    if [ -f "desc${year}.xml" ]
+    then
+      cat desc${year}.xml |
+      xtract -wrp "Set,Rec" -pattern DescriptorRecord \
+        -if TreeNumber -starts-with D \
+          -wrp "Code" -element "DescriptorRecord/DescriptorUI" \
+          -wrp "Name" -first "DescriptorName/String" \
+          -wrp "Term" -encode "Term/String" \
+          -wrp "Tree" -element "TreeNumberList/TreeNumber" >> chemtemp.xml
+    fi
+
+    if [ -f "chemtemp.xml" ]
+    then
+      cat chemtemp.xml | xtract -wrp Set -pattern Rec -sort Code |
+      transmute -format indent > chemconv.xml
+      rm chemtemp.xml
+    fi
+  fi
+
+  if [ ! -f "diszconv.xml" ]
+  then
+    rm -f disztemp.xml
+    if [ -f "supp${year}.xml" ]
+    then
+      cat supp${year}.xml |
+      xtract -wrp "Set,Rec" -pattern SupplementalRecord \
+        -if "SupplementalRecord@SCRClass" -eq 3 \
+          -wrp "Code" -element "SupplementalRecord/SupplementalRecordUI" \
+          -wrp "Name" -encode "SupplementalRecordName/String" \
+          -wrp "Term" -encode "Term/String" > disztemp.xml
+    fi
+
+    if [ -f "desc${year}.xml" ]
+    then
+      cat desc${year}.xml |
+      xtract -wrp "Set,Rec" -pattern DescriptorRecord \
+        -if TreeNumber -starts-with C \
+          -wrp "Code" -element "DescriptorRecord/DescriptorUI" \
+          -wrp "Name" -first "DescriptorName/String" \
+          -wrp "Term" -encode "Term/String" \
+          -wrp "Tree" -element "TreeNumberList/TreeNumber" >> disztemp.xml
+    fi
+
+    if [ -f "disztemp.xml" ]
+    then
+      cat disztemp.xml | xtract -wrp Set -pattern Rec -sort Code |
+      transmute -format indent > diszconv.xml
+      rm disztemp.xml
+    fi
+  fi
+}
+
+year=$(
+  nquire -get https://nlmpubs.nlm.nih.gov projects/mesh/MESH_FILES/xmlmesh |
+  xtract -mixed -pattern body -block a -if a -contains ".xml" -tab "\n" -terms a |
+  sort -Vr | head -n 1 | sed 's/[a-z.]//g'
+)
+
+if [ -z "$year" ]
+then
+  year="$(date +%Y)"
+fi
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  DoGeneRIFs
+  sleep 1
+
+  DoBioconcepts
+  sleep 1
+
+  echo "Copying to Data Directory" >&2
+  for fl in chemconv.xml diszconv.xml geneconv.xml genename.txt genesyns.txt
+  do
+    if [ ! -f "${dataBase}/$fl" ] && [ -f "${extrasBase}/$fl" ]
+    then
+      cp "${extrasBase}/$fl" "${dataBase}/$fl"
+    fi
+  done
+fi

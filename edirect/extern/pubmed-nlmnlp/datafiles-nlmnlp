@@ -1,0 +1,135 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# datafiles-nlmnlp
+
+downloadFTP() {
+  dir="$1"
+  msk="$2"
+
+  nquire -lst ftp.ncbi.nlm.nih.gov "$dir" |
+  grep "$msk" |
+  skip-if-file-exists | tee /dev/stderr |
+  if [ "$noAspera" = true ]
+  then
+    nquire -dwn ftp.ncbi.nlm.nih.gov "$dir"
+  else
+    nquire -asp ftp.ncbi.nlm.nih.gov "$dir"
+  fi
+}
+
+DoGeneRIFs() {
+
+  if [ ! -f "generifs_basic.gz" ]
+  then
+    if [ "$useFtp" = true ]
+    then
+      downloadFTP "gene/GeneRIF" "generifs_basic.gz"
+    elif [ "$useHttps" = true ]
+    then
+      nquire -bulk -get https://ftp.ncbi.nlm.nih.gov gene/GeneRIF generifs_basic.gz > generifs_basic.gz
+    fi
+  fi
+
+  if [ ! -f "gene_info.gz" ]
+  then
+    if [ "$useFtp" = true ]
+    then
+      downloadFTP "gene/DATA" "gene_info.gz"
+    elif [ "$useHttps" = true ]
+    then
+      nquire -bulk -get https://ftp.ncbi.nlm.nih.gov gene/DATA gene_info.gz > gene_info.gz
+    fi
+  fi
+}
+
+DoBioconcepts() {
+
+  if [ ! -f "chemical2pubtator3.gz" ]
+  then
+    if [ "$useFtp" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "chemical2pubtator3.gz"
+    elif [ "$useHttps" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "chemical2pubtator3.gz"
+    fi
+  fi
+
+  if [ ! -f "disease2pubtator3.gz" ]
+  then
+    if [ "$useFtp" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "disease2pubtator3.gz"
+    elif [ "$useHttps" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "disease2pubtator3.gz"
+    fi
+  fi
+
+  if [ ! -f "gene2pubtator3.gz" ]
+  then
+    if [ "$useFtp" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "gene2pubtator3.gz"
+    elif [ "$useHttps" = true ]
+    then
+      downloadFTP "pub/lu/PubTator3" "gene2pubtator3.gz"
+    fi
+  fi
+}
+
+year=$(
+  nquire -get https://nlmpubs.nlm.nih.gov projects/mesh/MESH_FILES/xmlmesh |
+  xtract -mixed -pattern body -block a -if a -contains ".xml" -tab "\n" -terms a |
+  sort -Vr | head -n 1 | sed 's/[a-z.]//g'
+)
+
+if [ -z "$year" ]
+then
+  year="$(date +%Y)"
+fi
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  echo "Checking for Outdated BioConcept and GeneRIF Files" >&2
+
+  fst=$( nquire -dir ftp.ncbi.nlm.nih.gov "pub/lu/PubTator3" )
+  scd=$( nquire -dir ftp.ncbi.nlm.nih.gov "gene/GeneRIF" )
+  for fl in chemical2pubtator3.gz disease2pubtator3.gz gene2pubtator3.gz
+  do
+    if [ -s "$fl" ]
+    then
+      one=$( echo "$fst" | grep "$fl" | cut -f 1 )
+      two=$( wc -c < "$fl" | tr -d ' ' )
+      if [ "$one" != "$two" ]
+      then
+        echo "Removing outdated $fl" >&2
+        rm "$fl"
+      fi
+    fi
+  done
+
+  if [ -s "generifs_basic.gz" ]
+  then
+    one=$( echo "$scd" | grep "generifs_basic.gz" | cut -f 1 )
+    two=$( wc -c < "generifs_basic.gz" | tr -d ' ' )
+    if [ "$one" != "$two" ]
+    then
+      echo "Removing outdated generifs_basic.gz" >&2
+      rm "generifs_basic.gz"
+    fi
+  fi
+
+  echo "Downloading GeneRIFs" >&2
+
+  DoGeneRIFs
+  sleep 1
+
+  echo "Downloading BioConcepts Tables" >&2
+
+  DoBioconcepts
+  sleep 1
+fi

@@ -1,7 +1,8 @@
 import unittest
 import xml.etree.ElementTree as ET
+from io import StringIO
 
-from base import parse_pubmed_record_xml
+from base import edirect_command, resolve_edirect_prefix, save_records, parse_pubmed_record_xml
 
 
 class TestBaseSmoke(unittest.TestCase):
@@ -47,6 +48,34 @@ class TestBaseSmoke(unittest.TestCase):
         record = parse_pubmed_record_xml(ET.fromstring(xml))
         self.assertEqual(record.get("pmid"), "456")
         self.assertEqual(record.get("pub_date"), "2023-11")
+
+    def test_save_records_jsonl_dedupes_within_run(self) -> None:
+        out = StringIO()
+        seen_pmids: set[str] = set()
+        records = [
+            {"pmid": "123", "title": "First"},
+            {"pmid": "123", "title": "Duplicate"},
+            {"pmid": "456", "title": "Second"},
+        ]
+
+        new_records, saved = save_records(
+            records,
+            conn=None,
+            jsonl_handle=out,
+            seen_pmids=seen_pmids,
+        )
+
+        self.assertEqual(saved, 2)
+        self.assertEqual([r["pmid"] for r in new_records], ["123", "456"])
+        self.assertEqual(len(out.getvalue().splitlines()), 2)
+
+    def test_edirect_command_accepts_directory_prefix(self) -> None:
+        self.assertEqual(edirect_command(["../edirect"], "esearch"), ["../edirect/esearch"])
+
+    def test_resolve_edirect_prefix_falls_back_to_repo_local_copy(self) -> None:
+        prefix = resolve_edirect_prefix("")
+        self.assertEqual(len(prefix), 1)
+        self.assertTrue(prefix[0].endswith("edirect"))
 
 
 if __name__ == "__main__":

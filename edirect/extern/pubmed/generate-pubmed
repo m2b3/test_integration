@@ -1,0 +1,221 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# generate-pubmed
+
+DoMeSHTree() {
+
+  year="$(date +%Y)"
+
+  if [ ! -f "meshconv.xml" ]
+  then
+    rm -f meshtemp.xml
+    if [ -f "supp${year}.xml" ]
+    then
+      cat supp${year}.xml |
+      xtract -wrp "Set,Rec" -pattern SupplementalRecord \
+        -if "SupplementalRecord@SCRClass" -eq 1 \
+        -or "SupplementalRecord@SCRClass" -eq 3 \
+          -wrp "Code" -element "SupplementalRecord/SupplementalRecordUI" \
+          -wrp "Name" -encode "SupplementalRecordName/String" \
+          -wrp "Term" -encode "Term/String" > meshtemp.xml
+    fi
+
+    if [ -f "desc${year}.xml" ]
+    then
+      cat desc${year}.xml |
+      xtract -wrp "Set,Rec" -pattern DescriptorRecord \
+        -wrp "Code" -element "DescriptorRecord/DescriptorUI" \
+        -wrp "Name" -first "DescriptorName/String" \
+        -wrp "Term" -encode "Term/String" \
+        -wrp "Tree" -element "TreeNumberList/TreeNumber" >> meshtemp.xml
+    fi
+
+    if [ -f "meshtemp.xml" ]
+    then
+      cat meshtemp.xml | xtract -wrp Set -pattern Rec -sort Code |
+      transmute -format indent > meshconv.xml
+      rm meshtemp.xml
+    fi
+  fi
+
+  if [ -f "meshconv.xml" ]
+  then
+    if [ ! -f "meshtree.txt" ]
+    then
+      cat meshconv.xml |
+      xtract -pattern Rec -if Tree -element Code -sep "," -element Tree > meshtree.txt
+    fi
+
+    if [ ! -f "meshname.txt" ]
+    then
+      cat meshconv.xml |
+      xtract -pattern Rec -if Name -element Code -sep "," -element Name > meshname.txt
+    fi
+  fi
+}
+
+DoSerials() {
+
+  year="$(date +%Y)"
+
+  basefile="serfilebase.${year}.xml"
+  updates=$( ls serfile* | grep -v serfilebase | sort -V )
+
+  if [ ! -f "serials.txt" ] && [ -s "$basefile" ]
+  then
+    echo "# ${basefile}" >> serials.txt
+    cat "$basefile" |
+    xtract -pattern NLMCatalogRecord -def "-" -element NlmUniqueID PublicationInfo/Country >> serials.txt
+    cat "$basefile" |
+    xtract -pattern DeleteCatalogRecord -block NlmUniqueID -element NlmUniqueID -lbl "-" -deq "\n" >> serials.txt
+  fi
+
+  if [ -f "serials.txt" ] 
+  then
+    ls serfile* |
+    sort -V |
+    while read serfile
+    do
+      if [ ! -s "$serfile" ]
+      then
+        echo "$serfile" >&2
+        nquire -bulk -get https://ftp.nlm.nih.gov projects/serfilelease "${serfile}" > $serfile
+      fi
+      if [ -s "$serfile" ]
+      then
+        if ! grep -Fq "$serfile" serials.txt
+        then
+          echo "# ${serfile}" >> serials.txt
+          cat "$serfile" |
+          xtract -pattern NLMCatalogRecord -def "-" -element NlmUniqueID PublicationInfo/Country >> serials.txt
+          cat "$serfile" |
+          xtract -pattern DeleteCatalogRecord -block NlmUniqueID -element NlmUniqueID -lbl "-" -deq "\n" >> serials.txt
+        fi
+      fi
+    done
+  fi
+}
+
+finish_jtas() {
+
+  tr -s ' ' |
+  sed -e 's/^ *//g' -e 's/ *$//g' |
+  sort-table -k 1,1f -k 3,3n -k 4,4nr -k 2,2f |
+  uniq -i |
+  awk -F '\t' '(NR == 1  ||  $1 != prev_key) { if (NR > 1) { print prev_line }; prev_key = $1; prev_line = $0 } END { print prev_line }' |
+  cut -f 1,2
+}
+
+multi_jtas() {
+
+  tr -s ' ' |
+  sed -e 's/^ *//g' -e 's/ *$//g' |
+  sort-table -k 1,1f -k 3,3n -k 4,4nr -k 2,2f |
+  uniq -i |
+  awk -F '\t' '(NR > 1 && $1 == prev_key && $4 == prev_flag) { print } (NR == 1 || $1 != prev_key) { print; prev_key = $1; prev_flag = $4 }' |
+  cut -f 1,2 | sort | uniq |
+  awk -F '\t' '{ if (NR == 1 || $1 != prev_key) { if (NR > 1) { print saved }; prev_key = $1; saved = $1 "\t" $2 } else { saved = saved " | " $2 } } END { print saved }'
+}
+
+DoJournals() {
+
+  if [ ! -f "jourconv.xml" ]
+  then
+
+    if [ -f "jourcache.xml" ]
+    then
+      cat jourcache.xml |
+      xtract -set Set -pattern Journal \
+        -if Name -and MedAbbr \
+          -NAME Name -ABRV MedAbbr -ACTV ActivityFlag \
+          -group Name -pkg Rec \
+            -wrp Key -jour Name -wrp Abrv -jour "&ABRV" \
+            -wrp Indx -jour "&NAME" -wrp Name -element "&NAME" \
+            -wrp Type -lbl "1" -wrp Flag -element "&ACTV" \
+          -group MedAbbr -pkg Rec \
+            -wrp Key -jour MedAbbr -wrp Abrv -jour "&ABRV" \
+            -wrp Indx -jour "&NAME" -wrp Name -element "&NAME" \
+            -wrp Type -lbl "2" -wrp Flag -element "&ACTV" \
+          -group Alias \
+            -block Alias -pkg Rec \
+              -wrp Key -jour Alias -wrp Abrv -jour "&ABRV" \
+              -wrp Indx -jour "&NAME" -wrp Name -element "&NAME" \
+              -wrp Type -lbl "3" -wrp Flag -element "&ACTV" \
+          -group Journal -if "&ABRV" -equals "bioRxiv" \
+            -block Journal -pkg Rec \
+              -wrp Key -lbl "biorxiv.org" -wrp Abrv -jour "&ABRV" \
+              -wrp Indx -jour "&NAME" -wrp Name -element "&NAME" \
+              -wrp Type -lbl "3" -wrp Flag -element "&ACTV" \
+            -block Journal -pkg Rec \
+              -wrp Key -lbl "biorxivorg" -wrp Abrv -jour "&ABRV" \
+              -wrp Indx -jour "&NAME" -wrp Name -element "&NAME" \
+              -wrp Type -lbl "3" -wrp Flag -element "&ACTV" |
+      xtract -set Set -pattern Rec \
+        -group Rec \
+          -block Rec -pkg Rec \
+            -wrp Key -lower Key -wrp Abrv -element Abrv \
+            -wrp Indx -element Indx -wrp Name -element Name \
+            -wrp Type -element Type -wrp Flag -element Flag |
+      xtract -set Set -pattern Rec \
+        -group Rec \
+          -block Rec -pkg Rec \
+            -wrp Key -element Key -wrp Abrv -element Abrv \
+            -wrp Indx -element Indx -wrp Name -element Name \
+            -wrp Type -element Type -wrp Flag -element Flag \
+          -block Rec -if Key -starts-with "journal " -pkg Rec \
+            -wrp Key -pfx "<Key>the " -element Key -wrp Abrv -element Abrv \
+            -wrp Indx -element Indx -wrp Name -element Name \
+            -wrp Type -element Type -wrp Flag -element Flag \
+          -block Rec -if Key -starts-with "the journal " -pkg Rec \
+            -wrp Key -element "Key[5:]" -wrp Abrv -element Abrv \
+            -wrp Indx -element Indx -wrp Name -element Name \
+            -wrp Type -element Type -wrp Flag -element Flag |
+      transmute -format > jourconv.xml
+    fi
+  fi
+
+  if [ -f "jourconv.xml" ]
+  then
+    if [ ! -f "jourabrv.txt" ]
+    then
+      cat jourconv.xml | xtract -pattern Rec -element Key Abrv Type Flag | finish_jtas > jourabrv.txt
+    fi
+    if [ ! -f "jourindx.txt" ]
+    then
+      cat jourconv.xml | xtract -pattern Rec -element Key Indx Type Flag | finish_jtas > jourindx.txt
+    fi
+    if [ ! -f "journame.txt" ]
+    then
+      cat jourconv.xml | xtract -pattern Rec -element Key Name Type Flag | finish_jtas > journame.txt
+    fi
+    if [ ! -f "joursets.txt" ]
+    then
+      cat jourconv.xml | xtract -pattern Rec -element Key Name Type Flag | multi_jtas > joursets.txt
+    fi
+    if [ ! -f "jourmaps.xml" ] && [ -f "jourindx.txt" ]
+    then
+      cat jourindx.txt | tbl2xml -set JournalMaps -rec Journal Key Indx > jourmaps.xml
+    fi
+  fi
+}
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  DoMeSHTree
+
+  DoSerials
+
+  DoJournals
+
+  echo "Copying to Data Directory"
+  for fl in jourabrv.txt jourindx.txt journame.txt joursets.txt meshconv.xml meshname.txt meshtree.txt
+  do
+    if [ ! -f "${dataBase}/$fl" ] && [ -f "${extrasBase}/$fl" ]
+    then
+      cp "${extrasBase}/$fl" "${dataBase}/$fl"
+    fi
+  done
+fi

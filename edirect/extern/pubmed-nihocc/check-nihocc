@@ -1,0 +1,37 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# check-nihocc
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  base_url=""
+  new_file_date=""
+
+  latest_occ=$(
+    nquire -bulk -get https://api.figshare.com/v2/collections/4586573/articles |
+    xtract -pattern anon -sort-rev published_date |
+    xtract -pattern anon -position first -element "*"
+  )
+  if [ -n "$latest_occ" ]
+  then
+    base_url=$( echo "$latest_occ" | xtract -pattern anon -element url )
+    new_file_date=$( echo "$latest_occ" | xtract -pattern anon -element published_date | cut -c 1-10 )
+  fi
+
+  if [ -f "open_citation_collection.zip" ] && [ -n "$new_file_date" ]
+  then
+    curr_file_date=$( date -r open_citation_collection.zip "+%Y-%m-%d" )
+    if [ -n "$curr_file_date" ]
+    then
+      if [[ "$new_file_date" > "$curr_file_date" ]]
+      then
+        DisplayWarning "Need to update open_citation_collection.zip release file from ${curr_file_date} to ${new_file_date}"
+      else
+        echo "Current public $new_file_date version of open_citation_collection.zip is not later than existing $curr_file_date download" >&2
+      fi
+    fi
+  fi
+fi

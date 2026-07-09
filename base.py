@@ -10,12 +10,14 @@ PubmedBookArticle records when present.
 - Batches through results using WebEnv/query_key history
 
 Usage:
-  python base.py --db pubmed.sqlite
-  python base.py --db pubmed.sqlite --query 'cerebellum AND eye tracking'
-  python base.py --db pubmed.sqlite --max 20000
-  python base.py --db pubmed.sqlite --max-tries 5 --sleep-between-tries 2.0
-  python base.py --db pubmed.sqlite --fetch-retries 5 --fetch-batch 100
-  python base.py --db pubmed.sqlite --start-from 6400  # Resume after error
+  python3 base.py
+  python3 base.py --db pubmed.sqlite --query 'cerebellum AND eye tracking'
+  python3 base.py --jsonl pubmed.jsonl
+  python3 base.py --db pubmed.sqlite --max 20000
+  python3 base.py --count-only
+  python3 base.py --db pubmed.sqlite --max-tries 5 --sleep-between-tries 2.0
+  python3 base.py --db pubmed.sqlite --fetch-retries 5 --fetch-batch 100
+  python3 base.py --db pubmed.sqlite --start-from 6400  # Resume after error
 
 Requirements:
   pip install biopython
@@ -181,6 +183,41 @@ def insert_articles(conn: sqlite3.Connection, records: List[Dict[str, object]]) 
             print(f"[db] insert failed for PMID={r.get('pmid')}: {e}", file=sys.stderr)
     conn.commit()
     return inserted
+
+
+def append_jsonl_records(handle, records: List[Dict[str, object]]) -> int:
+    for record in records:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    handle.flush()
+    return len(records)
+
+
+def save_records(
+    records: List[Dict[str, object]],
+    *,
+    conn: Optional[sqlite3.Connection],
+    jsonl_handle,
+    seen_pmids: set[str],
+) -> tuple[List[Dict[str, object]], int]:
+    if not records:
+        return [], 0
+
+    if jsonl_handle is not None:
+        new_records = []
+        for record in records:
+            pmid = str(record.get("pmid") or "")
+            if pmid and pmid not in seen_pmids:
+                seen_pmids.add(pmid)
+                new_records.append(record)
+        return new_records, append_jsonl_records(jsonl_handle, new_records)
+
+    if conn is None:
+        raise RuntimeError("SQLite connection is not available.")
+
+    pmids = [str(r["pmid"]) for r in records if r.get("pmid")]
+    already = existing_pmids(conn, pmids)
+    new_records = [r for r in records if r.get("pmid") and r["pmid"] not in already]
+    return new_records, insert_articles(conn, new_records)
 
 
 def parse_pubmed_record_xml(record_el: ET.Element) -> Dict[str, object]:
@@ -392,8 +429,7 @@ class EDirectStream:
         self._start(term, prefix)
 
     def _start(self, term: str, prefix: List[str]) -> None:
-        esearch_cmd = prefix + [
-            "esearch",
+        esearch_cmd = edirect_command(prefix, "esearch") + [
             "-db",
             "pubmed",
             "-query",
@@ -403,7 +439,7 @@ class EDirectStream:
             "-reldate",
             "1",
         ]
-        efetch_cmd = prefix + ["efetch", "-format", "xml"]
+        efetch_cmd = edirect_command(prefix, "efetch") + ["-format", "xml"]
         self._p1 = subprocess.Popen(esearch_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self._p2 = subprocess.Popen(efetch_cmd, stdin=self._p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         if self._p1.stdout:
@@ -455,10 +491,69 @@ def parse_edirect_prefix(raw: str) -> List[str]:
     return shlex.split(raw)
 
 
+def local_edirect_dir() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "edirect")
+
+
+def resolve_edirect_prefix(raw: str) -> List[str]:
+    prefix = parse_edirect_prefix(raw)
+    if prefix:
+        return prefix
+    local_dir = local_edirect_dir()
+    if os.path.isfile(os.path.join(local_dir, "esearch")) and os.path.isfile(os.path.join(local_dir, "efetch")):
+        return [local_dir]
+    return []
+
+
+def edirect_command(prefix: List[str], executable: str) -> List[str]:
+    if len(prefix) == 1 and os.path.isdir(prefix[0]):
+        return [os.path.join(prefix[0], executable)]
+    return prefix + [executable]
+
+
 def edirect_available(prefix: List[str]) -> bool:
     if prefix:
-        return True
+        return all(shutil.which(cmd[0]) or os.path.isfile(cmd[0]) for cmd in (
+            edirect_command(prefix, "esearch"),
+            edirect_command(prefix, "efetch"),
+        ))
     return bool(shutil.which("esearch") and shutil.which("efetch"))
+
+
+def edirect_pubmed_ids(term: str, prefix: List[str]) -> List[str]:
+    esearch_cmd = edirect_command(prefix, "esearch") + [
+        "-db",
+        "pubmed",
+        "-query",
+        term,
+        "-datetype",
+        "edat",
+        "-reldate",
+        "1",
+    ]
+    efetch_cmd = edirect_command(prefix, "efetch") + ["-format", "uid"]
+    p1 = subprocess.Popen(esearch_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    p2 = subprocess.Popen(
+        efetch_cmd,
+        stdin=p1.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if p1.stdout:
+        p1.stdout.close()
+    stdout, stderr = p2.communicate()
+    p1.wait()
+    if p1.returncode not in (0, None):
+        raise RuntimeError(f"EDirect esearch failed (code {p1.returncode})")
+    if p2.returncode not in (0, None):
+        detail = (stderr or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"EDirect efetch -format uid failed (code {p2.returncode}){suffix}")
+    ids = [line.strip() for line in stdout.splitlines() if line.strip().isdigit()]
+    if not ids:
+        raise RuntimeError("EDirect returned no PubMed IDs.")
+    return ids
 
 
 def _entrez_read_with_retries(open_request: Callable[[], object], label: str, max_retries: int = 3) -> object:
@@ -512,6 +607,18 @@ def esearch_last_24h(cfg: NCBIConfig, term: str, max_retries: int = 3) -> tuple[
     if not webenv or query_key is None:
         raise RuntimeError("ESearch did not return WebEnv/query_key.")
     return count, str(webenv), str(query_key)
+
+
+def count_last_24h(term: str, max_retries: int = 3) -> int:
+    params = {
+        "db": "pubmed",
+        "term": term,
+        "retmax": 0,
+        "reldate": 1,
+        "datetype": "edat",
+    }
+    data = _entrez_read_with_retries(lambda: Entrez.esearch(**params), "ESearch count", max_retries)
+    return int(data.get("Count", 0))
 
 
 def esearch_ids(term: str, retstart: int, retmax: int, max_retries: int = 3) -> List[str]:
@@ -636,7 +743,11 @@ def efetch_pubmed_by_ids(pmids: List[str], max_retries: int = 3) -> List[Dict[st
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--db", required=True, help="SQLite database path")
+    ap.add_argument("--db", default="pubmed.sqlite", help="SQLite database path (default: pubmed.sqlite)")
+    ap.add_argument(
+        "--jsonl",
+        help="Append fetched records to a JSON Lines text file instead of writing SQLite.",
+    )
     ap.add_argument(
         "--query",
         default="all[sb]",
@@ -644,6 +755,11 @@ def main() -> int:
     )
     ap.add_argument("--fetch-batch", type=int, default=200, help="Batch size for EFetch (PMIDs per request)")
     ap.add_argument("--max", type=int, default=0, help="Optional cap on total PMIDs processed (0 = no cap)")
+    ap.add_argument(
+        "--count-only",
+        action="store_true",
+        help="Print the last-24-hour PubMed match count and exit without fetching or writing records.",
+    )
     ap.add_argument(
         "--edirect",
         choices=["auto", "on", "off"],
@@ -653,7 +769,7 @@ def main() -> int:
     ap.add_argument(
         "--edirect-prefix",
         default="",
-        help="Command prefix to invoke EDirect (e.g., 'wsl' on Windows).",
+        help="Command prefix or EDirect directory (default: bundled ./edirect when present).",
     )
     ap.add_argument(
         "--max-tries",
@@ -685,13 +801,31 @@ def main() -> int:
     cfg = get_ncbi_config()
     configure_entrez(cfg, max_tries=args.max_tries, sleep_between_tries=args.sleep_between_tries)
 
-    conn = init_db(args.db)
+    if args.count_only:
+        count = count_last_24h(args.query)
+        print(f"[info] Query: {args.query}")
+        print(f"[info] NCBI email/tool: {cfg.email} / {cfg.tool}")
+        print(f"[info] Found {count} PubMed records (reldate=1, datetype=edat).")
+        print(count)
+        return 0
 
     count, webenv, query_key = esearch_last_24h(cfg, args.query)
 
     print(f"[info] Query: {args.query}")
     print(f"[info] NCBI email/tool: {cfg.email} / {cfg.tool}")
     print(f"[info] Found {count} PubMed records (reldate=1, datetype=edat).")
+
+    conn: Optional[sqlite3.Connection] = None
+    jsonl_handle = None
+    seen_pmids: set[str] = set()
+    output_label = f"db={args.db}"
+    if args.jsonl:
+        jsonl_handle = open(args.jsonl, "a", encoding="utf-8")
+        output_label = f"jsonl={args.jsonl}"
+        print(f"[info] Writing JSON Lines output to {args.jsonl}")
+    else:
+        conn = init_db(args.db)
+
     print(f"[info] WebEnv/query_key obtained (history enabled).")
 
     to_process = count
@@ -699,11 +833,14 @@ def main() -> int:
         to_process = min(to_process, args.max)
         print(f"[info] Applying cap --max={args.max}; will process up to {to_process} PMIDs.")
 
-    prefix = parse_edirect_prefix(args.edirect_prefix or os.getenv("EDIRECT_PREFIX", ""))
+    prefix = resolve_edirect_prefix(args.edirect_prefix or os.getenv("EDIRECT_PREFIX", ""))
     edirect_ok = edirect_available(prefix)
     if args.edirect == "on" and not edirect_ok:
         print("[error] EDirect requested but not found. Set PATH or use --edirect-prefix.", file=sys.stderr)
-        conn.close()
+        if conn is not None:
+            conn.close()
+        if jsonl_handle is not None:
+            jsonl_handle.close()
         return 1
     use_edirect = args.edirect != "off" and edirect_ok
 
@@ -714,78 +851,57 @@ def main() -> int:
     if to_process == 0:
         print(
             f"[done] total_seen={total_seen} total_new={total_new} total_inserted={total_inserted} "
-            f"db={args.db} at={utc_now_iso()}"
+            f"{output_label} at={utc_now_iso()}"
         )
-        conn.close()
+        if conn is not None:
+            conn.close()
+        if jsonl_handle is not None:
+            jsonl_handle.close()
         return 0
 
     if use_edirect:
-        print("[info] Using EDirect pipeline for retrieval.")
-        stream = EDirectStream(args.query, prefix)
-        batch: List[Dict[str, object]] = []
-        stopped_early = False
-        parse_error = False
-        try:
-            for record in stream:
-                batch.append(record)
-                if len(batch) >= args.fetch_batch:
-                    pmids = [str(r["pmid"]) for r in batch if r.get("pmid")]
-                    total_seen += len(pmids)
-                    already = existing_pmids(conn, pmids)
-                    new_records = [r for r in batch if r.get("pmid") and r["pmid"] not in already]
-                    total_new += len(new_records)
-                    print(
-                        f"[page] fetched={len(pmids)} new={len(new_records)} "
-                        f"total_seen={total_seen}/{to_process}"
-                    )
-                    if new_records:
-                        inserted = insert_articles(conn, new_records)
-                        total_inserted += inserted
-                        print(f"[insert] parsed={len(batch)} inserted={inserted}")
-                    batch = []
-                    if args.max and total_seen >= to_process:
-                        stopped_early = True
-                        break
+        print("[info] Using EDirect to retrieve PMID list, then fetching records in batches.")
+        ids = edirect_pubmed_ids(args.query, prefix)
+        if len(ids) != count:
+            print(f"[warn] EDirect returned {len(ids)} PMIDs but Entrez count was {count}.", file=sys.stderr)
+        to_process = min(to_process, len(ids))
+        retstart = args.start_from
+        if retstart > 0:
+            print(f"[info] Resuming from offset {retstart} (--start-from={retstart})")
 
-            # Process any remaining records in the batch
-            if batch:
-                pmids = [str(r["pmid"]) for r in batch if r.get("pmid")]
-                total_seen += len(pmids)
-                already = existing_pmids(conn, pmids)
-                new_records = [r for r in batch if r.get("pmid") and r["pmid"] not in already]
-                total_new += len(new_records)
-                print(
-                    f"[page] fetched={len(pmids)} new={len(new_records)} "
-                    f"total_seen={total_seen}/{to_process}"
-                )
-                if new_records:
-                    inserted = insert_articles(conn, new_records)
-                    total_inserted += inserted
-                    print(f"[insert] parsed={len(batch)} inserted={inserted}")
-        except StopIteration:
-            # Normal end of stream
-            pass
-        except Exception as e:
-            # Something went wrong (e.g., XML parse error)
-            print(f"[error] Error during EDirect processing: {e}", file=sys.stderr)
-            parse_error = True
-        finally:
-            # Force=True means we're cleaning up after early stop or error
-            stream.close(force=(stopped_early or parse_error))
+        while retstart < to_process:
+            this_batch = min(args.fetch_batch, to_process - retstart)
+            pmid_batch = ids[retstart : retstart + this_batch]
+            records = efetch_pubmed_by_ids(pmid_batch, max_retries=args.fetch_retries)
+            retstart += this_batch
+
+            pmids = [str(r["pmid"]) for r in records if r.get("pmid")]
+            total_seen += len(pmids)
+            new_records, inserted = save_records(
+                records,
+                conn=conn,
+                jsonl_handle=jsonl_handle,
+                seen_pmids=seen_pmids,
+            )
+            total_new += len(new_records)
+            print(
+                f"[page] retstart={retstart - this_batch} fetched={len(pmids)} "
+                f"new={len(new_records)} total_seen={retstart}/{to_process}"
+            )
+            print(f"[progress] To resume from this point if interrupted, use: --start-from {retstart}", file=sys.stderr)
+            total_inserted += inserted
+            if inserted:
+                print(f"[save] parsed={len(records)} saved={inserted}")
 
         print(
             f"[done] total_seen={total_seen} total_new={total_new} total_inserted={total_inserted} "
-            f"db={args.db} at={utc_now_iso()}"
+            f"{output_label} at={utc_now_iso()}"
         )
 
-        if parse_error:
-            print("\n[info] Suggestions to avoid errors:", file=sys.stderr)
-            print("  1. Reduce batch size: --fetch-batch 50", file=sys.stderr)
-            print("  2. Limit total records: --max 5000", file=sys.stderr)
-            print("  3. Use Biopython instead: --edirect off", file=sys.stderr)
-            print("  4. Retry the same command - partial results were saved", file=sys.stderr)
-
-        conn.close()
+        if conn is not None:
+            conn.close()
+        if jsonl_handle is not None:
+            jsonl_handle.close()
         return 0
 
     esearch_retstart_limit = 9998
@@ -829,10 +945,15 @@ def main() -> int:
                     if count > esearch_max_records:
                         print(
                             f"[error] EFetch history failed and ESearch ID-list mode cannot fetch beyond "
-                            f"{esearch_max_records} records. Consider narrowing the query or using EDirect.",
+                            f"{esearch_max_records} PubMed records. The NCBI API key and WebEnv/query_key "
+                            f"history token do not bypass this PubMed paging limit. Consider narrowing the "
+                            f"query or using EDirect with --edirect on.",
                             file=sys.stderr,
                         )
-                        conn.close()
+                        if conn is not None:
+                            conn.close()
+                        if jsonl_handle is not None:
+                            jsonl_handle.close()
                         return 1
                     print(
                         f"[warn] EFetch history still failing with HTTP 400 at retstart={retstart}. "
@@ -863,9 +984,12 @@ def main() -> int:
         pmids = [str(r["pmid"]) for r in records if r.get("pmid")]
         total_seen += len(pmids)
 
-        # Dedup against DB
-        already = existing_pmids(conn, pmids)
-        new_records = [r for r in records if r.get("pmid") and r["pmid"] not in already]
+        new_records, inserted = save_records(
+            records,
+            conn=conn,
+            jsonl_handle=jsonl_handle,
+            seen_pmids=seen_pmids,
+        )
         total_new += len(new_records)
 
         print(
@@ -877,16 +1001,18 @@ def main() -> int:
         if not new_records:
             continue
 
-        inserted = insert_articles(conn, new_records)
         total_inserted += inserted
-        print(f"[insert] parsed={len(records)} inserted={inserted}")
+        print(f"[save] parsed={len(records)} saved={inserted}")
 
     print(
         f"[done] total_seen={total_seen} total_new={total_new} total_inserted={total_inserted} "
-        f"db={args.db} at={utc_now_iso()}"
+        f"{output_label} at={utc_now_iso()}"
     )
 
-    conn.close()
+    if conn is not None:
+        conn.close()
+    if jsonl_handle is not None:
+        jsonl_handle.close()
     return 0
 
 

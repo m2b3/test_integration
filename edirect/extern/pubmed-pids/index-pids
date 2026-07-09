@@ -1,0 +1,53 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-pids
+
+if [ -d "${scratchBase}" ]
+then
+  echo "Removing Previous Indices" >&2
+
+  target="${currentBase}"
+  find "$target" -name "*.xml" -delete
+  find "$target" -name "*.xml.gz" -delete
+
+  target="${indexedBase}"
+  find "$target" -name "*.e2x" -delete
+  find "$target" -name "*.e2x.gz" -delete
+
+  target="${invertedBase}"
+  find "$target" -name "*.inv" -delete
+  find "$target" -name "*.inv.gz" -delete
+fi
+
+if [ -d "${mergedBase}" ]
+then
+  target="${mergedBase}"
+  find "$target" -name "*.mrg" -delete
+  find "$target" -name "*.mrg.gz" -delete
+fi
+
+if [ -d "${indexedBase}" ]
+then
+  echo "Reversing Original Inverted Indices" >&2
+
+  cd "${indexedBase}"
+
+  target="${indexedBase}"
+
+  # note: source data is pubmed incremental inverted index files in invertBase
+  # do not try to "correct" this to invertedBase
+  for dir in "${invertBase}"/??/??/
+  do
+    if [ -d "$dir" ]
+    then
+      echo "${dir}.*.inv.gz"
+      gunzip -c "$dir"/*.inv.gz |
+      xtract -pattern InvDocument -KEY InvKey \
+        -block PMCID \
+          -tab "," -element PMCID "&KEY" -deq "\n"
+    fi
+  done |
+  go run "${externBase}/${folder}/prep-pmcid.go" |
+  go run "${externBase}/prep-finish.go" 500000 "$target" "pmcid"
+fi

@@ -1,0 +1,138 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# populate-pubmed
+
+ReportVersioned() {
+  inp="$1"
+  pmidlist=.TO-VERSION
+  xtract -input "$inp" -pattern PubmedArticle \
+    -block MedlineCitation/PMID -if "@Version" -gt 1 -element "PMID" < /dev/null |
+  sort -n | uniq > "${temporaryBase}/$pmidlist"
+  if [ -s "${temporaryBase}/$pmidlist" ]
+  then
+    cat "${temporaryBase}/$pmidlist" >> "${archiveBase}/versioned.uid"
+  fi
+  rm "${temporaryBase}/$pmidlist"
+}
+
+ReportDeleted() {
+  inp="$1"
+  pmidlist=.TO-DELETE
+  xtract -input "$inp" -pattern PubmedArticle \
+    -sep "\n" -element MedlineCitation/PMID < /dev/null |
+  sort -n | uniq > "${temporaryBase}/$pmidlist"
+  if [ -s "${temporaryBase}/$pmidlist" ]
+  then
+    cat "${temporaryBase}/$pmidlist" >> "${archiveBase}/deleted.uid"
+  fi
+  rm "${temporaryBase}/$pmidlist"
+}
+
+PMStash() {
+
+  fl="$1"
+
+  needToReport=true
+  timeout=100
+
+  base=${fl%.xml.gz}
+  secnds_start=$(date "+%s")
+  echo "$base.xml"
+
+  gunzip -c "$fl" |
+  transmute -strict -normalize pubmed > "${temporaryBase}/$base.tmp"
+
+  ReportVersioned "${temporaryBase}/$base.tmp"
+
+  # make variant PubmedArticle record for deletion PMIDs
+  cat "${temporaryBase}/$base.tmp" |
+  xtract -pattern DeleteCitation \
+    -wrp "PubmedArticle/DELETE/MedlineCitation/PMID" -element PMID > "${temporaryBase}/$base.del"
+
+  ReportDeleted "${temporaryBase}/$base.del"
+
+  # append deletions after insertions, so that stable sort will apply deletions after insertions
+  cat "${temporaryBase}/$base.tmp" "${temporaryBase}/$base.del" |
+  xtract -set PubmedArticleSet -pattern PubmedArticle -stable-sort-fwd MedlineCitation/PMID |
+  transmute -compress \
+    -pattern PubmedArticleSet -format flush > "${temporaryBase}/$base.xml"
+
+  rm "${temporaryBase}/$base.tmp"
+  rm "${temporaryBase}/$base.del"
+
+  env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -gzip -input "${temporaryBase}/$base.xml" -archive -db "$dbase" \
+    -delete "$delete" -index "$index" -pattern "$name" < /dev/null
+
+  touch "${sentinelsBase}/$base.snt"
+  rm "${temporaryBase}/$base.xml"
+
+  secnds_end=$(date "+%s")
+  secnds=$((secnds_end - secnds_start))
+  if [ "$needToReport" = true ]
+  then
+    if [ "$secnds" -gt "$timeout" ]
+    then
+      echo ""
+      echo "ARCHIVING IS SLOWER THAN EXPECTED."
+      echo ""
+      echo "PLEASE ENSURE THAT ANTIVIRUS SCANNING AND CONTENT INDEXING ARE DISABLED,"
+      echo "AND THAT TRIM SUPPORT IS ENABLED FOR THE SOLID STATE DRIVE."
+      echo ""
+      if [ "$osname" = "Darwin" ]
+      then
+        master=${archive%/Archive/}
+        echo "  sudo mdutil -i off ${master}"
+        echo "  sudo mdutil -E ${master}"
+        echo "  sudo touch ${master}/.fseventsd/no_log"
+        echo ""
+      fi
+      needToReport=false
+    fi
+  fi
+}
+
+if [ -d "${sourceBase}" ] && [ -d "${archiveBase}" ] && [ -d "${temporaryBase}" ]
+then
+  cd "${sourceBase}"
+
+  first=""
+  last=""
+
+  for fl in *.xml.gz
+  do
+    base=${fl%.xml.gz}
+    if [ -z "$first" ]
+    then
+      first="$base"
+    fi
+    last="$base"
+  done
+
+  if [ -n "$first" ] && [ -n "$last" ]
+  then
+    fst=$( echo "$first" | cut -c 7-8 )
+    lst=$( echo "$last" | cut -c 7-8 )
+    if [ -n "$fst" ] && [ -n "$lst" ] && [ "$fst" != "$lst" ]
+    then
+      echo "" >&2
+      echo "ERROR: Local PubMed archive contains a mixture of years, from 20${fst} to 20${lst}" >&2
+      echo "Please remove files from previous years, and run archive-pubmed -scour to clear stale data," >&2
+      echo "before rerunning archive-pubmed -index" >&2
+      echo "" >&2
+      exit 1
+    fi
+  fi
+
+  for fl in *.xml.gz
+  do
+    base=${fl%.xml.gz}
+    # skip if sentinel present or if file is present but empty
+    if [ ! -f "${sentinelsBase}/$base.snt" ] && [ -s "$fl" ]
+    then
+      # printf "."
+      PMStash "$fl"
+    fi
+  done
+  # printf "\n"
+fi

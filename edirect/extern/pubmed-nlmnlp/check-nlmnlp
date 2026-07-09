@@ -1,0 +1,34 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# check-nlmnlp
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  fst=$( nquire -dir ftp.ncbi.nlm.nih.gov "pub/lu/PubTator3" )
+  scd=$( nquire -dir ftp.ncbi.nlm.nih.gov "gene/GeneRIF" )
+  for fl in chemical2pubtator3.gz disease2pubtator3.gz gene2pubtator3.gz
+  do
+    if [ -s "$fl" ]
+    then
+      one=$( echo "$fst" | grep "$fl" | cut -f 1 )
+      two=$( wc -c < "$fl" | tr -d ' ' )
+      if [ "$one" != "$two" ]
+      then
+        DisplayWarning "Need to update $fl"
+      fi
+    fi
+  done
+
+  if [ -s "generifs_basic.gz" ]
+  then
+    one=$( echo "$scd" | grep "generifs_basic.gz" | cut -f 1 )
+    two=$( wc -c < "generifs_basic.gz" | tr -d ' ' )
+    if [ "$one" != "$two" ]
+    then
+      DisplayWarning "Need to update generifs_basic"
+    fi
+  fi
+fi

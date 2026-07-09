@@ -1,114 +1,99 @@
 # infogather
 
-This repository contains a small PubMed ingestion tool. The main script fetches PubMed records that were added or updated in the last 24 hours, extracts a useful subset of fields, and stores them in a local SQLite database with deduplication by PMID.
+`infogather` fetches PubMed records added or updated in the last 24 hours and stores a normalized subset of each record in SQLite. It is designed as a small, portable local ingestion tool.
 
-The project has two Python entrypoints:
+The project has one Python entrypoint:
 
-- `base.py`: main ingestion script
-- `embedding.py`: interactive semantic recommendation workflow built on top of the same PubMed/SQLite ingestion logic
+- `base.py`: fetch PubMed records into SQLite
 
-It uses Biopython's `Bio.Entrez` client by default and can optionally use external NCBI EDirect tools if they are installed, but EDirect is not required.
+By default, retrieval uses Biopython's `Bio.Entrez` client and NCBI E-utilities. A local EDirect copy is bundled in `edirect/` for larger retrievals or fallback use, but it is disabled by default because the Biopython path is more stable for smaller workflows.
 
-## What `base.py` does
+## Quick Start
 
-`base.py`:
-
-- queries PubMed for records in the last 24 hours
-- fetches records in XML form
-- parses fields including PMID, title, journal, publication date, DOI, authors, and abstract
-- stores parsed records in SQLite
-- avoids duplicate inserts by using PMID as the primary key
-- supports retry behavior and resumable fetch offsets for long runs
-
-Typical usage:
+Create an environment and install dependencies. This plain Python workflow works on Linux, macOS, and Windows/WSL as long as you have a recent Python 3 installed.
 
 ```bash
-python base.py --db pubmed.sqlite
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-Example with a narrower search term:
+On macOS, install Python first if needed:
 
 ```bash
-python base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
+brew install python
 ```
 
-## Semantic paper recommendations
+Then run the same `python3 -m venv ...` commands above.
 
-`embedding.py` adds a two-stage recommendation workflow:
-
-1. PubMed topic query for coarse retrieval:
-   it asks PubMed for all records added/updated in the past 24 hours matching a broad topic, using `datetype="edat"` and `reldate=1`. By default it adds `hasabstract[text]` so the embedding step has useful text.
-2. Embedding cosine similarity for personalized ranking:
-   it embeds the user's specific interest and every candidate paper's `Title: ...\nAbstract: ...`, then ranks papers by normalized dot product similarity.
-
-The default embedding model is the free/open-source `sentence-transformers/allenai-specter`, which is designed for scientific paper title + abstract embeddings and runs on CPU.
-
-Interactive example:
+Create a `.env` file or export these variables in your shell:
 
 ```bash
-python embedding.py
+NCBI_EMAIL=you@example.com
+NCBI_TOOL=infogather
+NCBI_API_KEY=optional_ncbi_api_key
 ```
 
-Non-interactive example:
+`NCBI_API_KEY` is optional, but recommended for higher NCBI E-utilities rate limits.
+
+Fetch all PubMed records added or updated in the last 24 hours:
 
 ```bash
-python embedding.py \
-  --db pubmed.sqlite \
-  --topic "cancer" \
-  --interest "single-cell genomics for early cancer biomarker discovery"
+python3 base.py --db pubmed.sqlite
 ```
 
-Useful options:
+Run a smaller test ingest:
 
 ```bash
-python embedding.py \
-  --db pubmed.sqlite \
-  --topic "genomics" \
-  --interest "genomic biomarkers for breast cancer prognosis" \
-  --top-k 10 \
-  --fetch-batch 200 \
-  --model-name sentence-transformers/allenai-specter
+python3 base.py --db pubmed.sqlite --max 500
 ```
 
-Disable the default abstract filter if you want PubMed to return records even when they lack abstracts:
+Fetch a topic-specific subset from the last 24 hours:
 
 ```bash
-python embedding.py --db pubmed.sqlite --topic "neuroscience" --no-has-abstract-filter
+python3 base.py --db pubmed.sqlite --query "cerebellum AND eye tracking"
 ```
 
-Use `--refresh` to replace existing rows for PMIDs fetched in the current run before inserting the newly fetched records.
+If a long run is interrupted, use the printed `--start-from` value:
 
-## How `base.py` is structured
+```bash
+python3 base.py --db pubmed.sqlite --start-from 6400
+```
 
-The script is still a single-file tool, but it already has a clear internal split by responsibility.
+For a normal local run on macOS, Linux, or Windows/WSL, this plain Python workflow is all you need. Docker and Apptainer are optional container workflows and are not required to fetch PubMed data locally.
 
-- configuration helpers:
-  `get_ncbi_config()`, `load_dotenv()`, and `configure_entrez()` load `.env`, read NCBI-related environment variables, and configure Biopython Entrez
-- database helpers:
-  `init_db()`, `existing_pmids()`, and `insert_articles()` create the SQLite schema, check which PMIDs are already present, and insert only new records
-- XML parsing:
-  `parse_pubmed_record_xml()` extracts the normalized record fields from a single PubMed XML element
-- XML stream handling:
-  `iter_pubmed_records_from_handle()` and `parse_pubmed_records_from_handle()` parse PubMed XML streams into Python dictionaries while tolerating partial parsing failures
-- optional EDirect integration:
-  `EDirectStream`, `parse_edirect_prefix()`, and `edirect_available()` support an alternate retrieval path using external `esearch` and `efetch` commands
-- Biopython PubMed retrieval:
-  `esearch_last_24h()`, `esearch_ids()`, `efetch_pubmed_batch()`, and `efetch_pubmed_by_ids()` handle Entrez search/fetch calls and retry behavior
-- command-line orchestration:
-  `main()` wires together argument parsing, retrieval mode selection, pagination, deduplication, insertion, progress reporting, and resume support
+## What "Last 24 Hours" Means
 
-Functionally, a normal run does this:
+The default query is:
 
-1. Load configuration from environment variables and an optional `.env` file.
-2. Open or create the SQLite database.
-3. Query PubMed for the last 24 hours of matching records.
-4. Fetch PubMed XML in batches.
-5. Parse each record into normalized Python fields.
-6. Check which PMIDs are already in the database.
-7. Insert only new records.
-8. Print progress and a final summary.
+```text
+all[sb]
+```
 
-The main persisted schema is a single `pubmed_articles` table with:
+`base.py` combines that query with NCBI Entrez date filtering:
+
+```text
+reldate=1
+datetype=edat
+```
+
+That means it asks PubMed for records added to or updated in Entrez during the previous 24 hours. It is not a local mirror of the entire PubMed corpus.
+
+The successful full-day retrieval mechanism is:
+
+1. `Entrez.esearch(db="pubmed", term="all[sb]", reldate=1, datetype="edat", usehistory="y", retmax=0)`
+2. read the returned record count, `WebEnv`, and `query_key`
+3. page through that stable NCBI History Server result set with `Entrez.efetch(...)`
+4. parse PubMed XML records in batches
+5. insert new PMIDs into SQLite with deduplication
+
+This History Server path is what lets the script fetch a full 24-hour result set instead of relying on a single returned ID list.
+
+## Output
+
+The output database has one table, `pubmed_articles`, keyed by PMID.
+
+Stored fields:
 
 - `pmid`
 - `title`
@@ -120,115 +105,57 @@ The main persisted schema is a single `pubmed_articles` table with:
 - `fetched_at`
 - `raw_json`
 
-That means the script is currently optimized for a simple append-and-deduplicate workflow rather than a richer relational data model.
+Existing SQLite files such as `pubmed.sqlite`, `base.sqlite`, or `new.db` are workflow outputs. They are not required source files.
 
-## Obvious next features
+## Common Commands
 
-These are the most immediate additions that would fit the current codebase without a redesign:
-
-- add a `README` example for common queries:
-  for example broad ingest, topic-specific ingest, and small test runs with `--max`
-- add export commands:
-  support writing records to CSV or JSON in addition to SQLite
-- add a date-range option:
-  replace the fixed last-24-hours behavior with explicit start/end or `--days N`
-- add update behavior:
-  right now inserts are `INSERT OR IGNORE`; a new mode could refresh existing rows if PubMed metadata changed
-- add more parsed fields:
-  affiliations, MeSH terms, keywords, publication types, language, or PMID status are obvious candidates
-- add better operational logging:
-  write progress and failures to a log file instead of only stdout/stderr
-- add schema/version metadata:
-  record when the database was created and what script/schema version produced it
-- add a query or report utility:
-  a second script could inspect the SQLite DB and summarize counts by day, journal, or keyword
-- add tests beyond smoke coverage:
-  especially for XML edge cases, EDirect mode behavior, and database insertion logic
-- add a lock or single-run guard:
-  useful if collaborators might accidentally run multiple ingests against the same SQLite file
-- add packaged CLI entrypoints:
-  move from a single script toward a small installable package with clearer commands
-
-If the goal stays "small and portable", the best immediate feature work is probably:
-
-- better tests
-- explicit date-range control
-- export to CSV/JSON
-- optional update/upsert behavior for existing PMIDs
-
-## Repository layout
-
-Top-level files and directories:
-
-- `base.py`: main PubMed ingestion script
-- `tests/test_base_smoke.py`: small smoke tests for XML parsing behavior
-- `requirements.txt`: Python package requirements for running the script without a repo-local virtualenv
-- `Dockerfile`: Linux Docker image definition for portable containerized execution
-- `Apptainer.def`: Apptainer/Singularity recipe for Linux and HPC environments
-- `.dockerignore`: excludes local artifacts from Docker build context
-- `.env`: optional local environment file read by `base.py` if present
-- `base.sqlite`, `new.db`: existing SQLite database artifacts in this working tree
-- `stuff.md`: auxiliary notes/documentation not required to run the script
-
-Generated or local-only artifacts you may also see:
-
-- `__pycache__/`: Python bytecode cache
-- test caches or temporary files created locally
-
-## Requirements
-
-This repo no longer depends on a checked-in virtualenv. The runtime dependencies are declared in `requirements.txt`.
-
-Current Python dependencies:
-
-- `biopython`
-- `numpy`
-- `sentence-transformers`
-
-System/runtime assumptions:
-
-- Python 3.12 or compatible recent Python 3
-- network access to NCBI if you are actually fetching PubMed data
-- a writable path for the SQLite database file
-
-Optional environment variables:
-
-- `NCBI_EMAIL`: email sent to NCBI via Entrez
-- `NCBI_TOOL`: tool name sent to NCBI
-- `NCBI_API_KEY`: optional NCBI API key for higher rate limits
-- `EDIRECT_PREFIX`: optional command prefix if using EDirect through something like WSL
-
-## Running the project
-
-What collaborators can do now:
-
-- plain Python:
-  `python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
-- Docker:
-  `docker build -t infogather .`
-- Apptainer:
-  `apptainer build infogather.sif Apptainer.def`
-
-### Plain Python
-
-Create your own environment and install dependencies:
+Broad 24-hour ingest:
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-python base.py --db pubmed.sqlite
+python3 base.py
 ```
 
-For semantic recommendations:
+By default, this writes to `pubmed.sqlite`. Use `--db some-file.sqlite` to choose another output path.
+
+Write parsed records to a plain text JSON Lines file instead of SQLite:
 
 ```bash
-python embedding.py
+python3 base.py --jsonl pubmed.jsonl
 ```
 
-The first embedding run may download the model from Hugging Face, so it needs internet access.
+Count matching PubMed records from the last 24 hours without downloading article records:
 
-### Docker
+```bash
+python3 base.py --count-only
+```
+
+Conservative ingest with smaller batches and more retries:
+
+```bash
+python3 base.py --db pubmed.sqlite --fetch-batch 100 --fetch-retries 5
+```
+
+Disable EDirect explicitly, matching the default stable path:
+
+```bash
+python3 base.py --db pubmed.sqlite --edirect off
+```
+
+Use the bundled EDirect path for larger result sets:
+
+```bash
+python3 base.py --jsonl pubmed_last24_edirect.jsonl --edirect on
+```
+
+Use a different EDirect checkout:
+
+```bash
+python3 base.py --jsonl pubmed_last24_edirect.jsonl --edirect on --edirect-prefix /path/to/edirect
+```
+
+## Docker
+
+Docker is optional. Use it only if you want to run the project in a Docker container, for example through Docker Desktop or another Linux container runtime.
 
 Build and run:
 
@@ -237,11 +164,13 @@ docker build -t infogather .
 docker run --rm -v "$PWD:/work" -w /work infogather --db /work/pubmed.sqlite
 ```
 
-This keeps the output database on the host by mounting the working directory into the container.
+The mounted working directory keeps the SQLite output on the host.
 
-### Apptainer
+## Apptainer
 
-Build and run on Linux:
+Apptainer is optional. It is mainly for Linux/HPC environments where Apptainer or Singularity is the standard container runtime.
+
+Build and run:
 
 ```bash
 apptainer build infogather.sif Apptainer.def
@@ -250,16 +179,27 @@ apptainer run infogather.sif --db ./pubmed.sqlite
 
 ## Testing
 
-Run the smoke tests with:
+Run the smoke tests:
 
 ```bash
-python -m unittest -v tests/test_base_smoke.py
+python3 -m unittest -v tests/test_base_smoke.py
 ```
+
+## Project Layout
+
+- `base.py`: main PubMed ingestion script
+- `tests/test_base_smoke.py`: XML parsing smoke tests
+- `requirements.txt`: Python runtime dependencies
+- `Dockerfile`: Docker image definition
+- `Apptainer.def`: Apptainer/Singularity recipe
+- `.dockerignore`: Docker build exclusions
+- `.env`: optional local NCBI configuration, not required in source control
+- `*.sqlite`, `*.db`: generated SQLite outputs
 
 ## Notes
 
-- EDirect is optional. The default code path uses Biopython and works without installing EDirect.
-- EDirect is not bundled in this repo.
-- The last-24-hours query can return a large number of records, so using `--max` is useful for smaller test runs.
-- `embedding.py` intentionally uses a broad PubMed keyword/query search first, then semantic embedding similarity for the final ranking. PubMed itself is not used as a semantic search engine.
-- The SQLite database is part of the workflow output, not a required source file.
+- The default retrieval path is Biopython Entrez, not EDirect.
+- The bundled `edirect/` directory is used automatically when `--edirect on` is selected and no `--edirect-prefix` is provided.
+- `NCBI_API_KEY` is used if present in `.env` or the shell environment.
+- Re-running an ingest is safe for duplicates because PMID is the primary key.
+- The project currently appends and deduplicates records; it is not a full PubMed mirror or a historical archive.

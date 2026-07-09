@@ -1,0 +1,34 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-pmc
+
+stem=false
+
+# variable contains pmc-database-specific xtract indexing instructions
+read -r -d '' idxtxt <<- EOS
+xtract -set IdxDocumentSet -rec IdxDocument \
+  -pattern PMCInfo -UID PMCInfo/UID -LEN -len "*" \
+    -wrp IdxUid -element "&UID" -clr -rst -tab "" \
+    -group PMCInfo -pkg IdxSearchFields \
+      -block PMCInfo \
+        -wrp UID -pad "&UID" \
+        -wrp SIZE -inc "&LEN" \
+        -wrp YEAR -element YEAR \
+        -wrp JOUR -plain JOUR \
+        -wrp JOUR -plain SRC \
+        -subset AUTH \
+          -wrp AUTH -sep " " -author LastName,Initials \
+      -block PMCInfo \
+        -wrp TITL -indexer TITLE/TEXT \
+        -wrp ABST -indexer ABSTRACT/TEXT \
+        -wrp TEXT -indexer TEXT \
+        -wrp PAIR -pairx TITLE/TEXT
+EOS
+
+if [ "$stem" = true ]
+then
+  idxtxt=$( echo "$idxtxt -block PMCInfo -wrp STEM -indexer TEXT" )
+fi
+
+IncrementalIndex "${idxtxt}"

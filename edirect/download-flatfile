@@ -1,0 +1,240 @@
+#!/bin/sh
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# download-flatfile BCT PLN
+
+# to remove corrupt files prior to downloading again, use:
+# download-flatfile -verify BCT PLN
+
+useFtp=true
+useHttps=false
+justVerify=false
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -ftp )
+      useFtp=true
+      useHttps=false
+      shift
+      ;;
+    -http | -https )
+      useFtp=false
+      useHttps=true
+      shift
+      ;;
+    -verify | -validate )
+      justVerify=true
+      shift
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+if [ "$#" -lt 1 ]
+then
+  echo "Must have at least one sequence division abbreviation"
+  exit 1
+fi
+
+# construct grep command to filter desired GenBank divisions
+filt="grep"
+while [ "$#" -gt 0 ]
+do
+  filt=$( echo "$filt -e $1" )
+  shift
+done
+filt=$( echo "$filt" | tr '[A-Z]' '[a-z]' )
+
+# if -verify flag is set, check existing *.seq.gz files, remove any that fail validation
+if [ "$justVerify" = true ]
+then
+  didFail=false
+  ls *.seq.gz | eval "$filt" | sort -V |
+  while read fl
+  do
+    # delete files that fail validation
+    if [ -s "$fl" ]
+    then
+      errs=$( (gunzip -c "$fl" | gbf2xml | xtract -mixed -verify) 2>&1 )
+      if [ -n "$errs" ]
+      then
+        # delete
+        didFail=true
+        rm -f "$fl"
+        echo "Removed corrupted file '$fl'" >&2
+      fi
+    else
+      didFail=true
+      rm -f "$fl"
+      echo "Removed empty file '$fl'" >&2
+    fi
+  done
+  if [ "$didFail" = true ]
+  then
+    echo "Rerun download-flatfile command on selected GenBank divisions without -verify flag"
+  fi
+  exit 0
+fi
+
+DownloadOneByFTP() {
+
+  fl="$1"
+
+  url="ftp.ncbi.nlm.nih.gov/genbank"
+
+  echo "$fl" |
+  nquire -asp "${url}"
+
+  # delete if file is present but empty
+  if [ -f "$fl" ] && [ ! -s "$fl" ]
+  then
+    rm -f "$fl"
+  fi
+
+  # retry if no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "First Failed Download Retry" >&2
+    echo "$fl" |
+    nquire -asp "${url}"
+  fi
+
+  # retry again if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "Second Failed Download Retry" >&2
+    echo "$fl" |
+    nquire -asp "${url}"
+  fi
+
+  # verify contents
+  if [ -s "$fl" ]
+  then
+    errs=$( (gunzip -c "$fl" | gbf2xml | xtract -mixed -verify) 2>&1 )
+    if [ -n "$errs" ]
+    then
+      # delete and retry one more time
+      rm -f "$fl"
+      sleep 10
+      echo "Invalid Contents Retry" >&2
+      echo "$fl" |
+      nquire -asp "${url}"
+      if [ -s "$fl" ]
+      then
+        errs=$( (gunzip -c "$fl" | gbf2xml | xtract -mixed -verify) 2>&1 )
+        if [ -n "$errs" ]
+        then
+          rm -f "$fl"
+          frst=$( echo "$errs" | head -n 1 )
+          echo "ERROR invalid file '$fl' deleted, errors start with '$frst'" >&2
+        fi
+      else
+        echo "Download Attempts Failed" >&2
+      fi
+    fi
+  else
+    rm -f "$fl"
+    echo "Download of '$fl' Failed" >&2
+  fi
+}
+
+DownloadOneByHTTPS() {
+
+  fl="$1"
+
+  url="https://ftp.ncbi.nlm.nih.gov/genbank"
+
+  nquire -bulk -get "${url}" "$fl" > "$fl"
+
+  # delete if file is present but empty
+  if [ -f "$fl" ] && [ ! -s "$fl" ]
+  then
+    rm -f "$fl"
+  fi
+
+  # retry if no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "First Failed Download Retry" >&2
+    nquire -bulk -get "${url}" "$fl" > "$fl"
+  fi
+
+  # retry again if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "Second Failed Download Retry" >&2
+    nquire -bulk -get "${url}" "$fl" > "$fl"
+  fi
+
+  # verify contents
+  if [ -s "$fl" ]
+  then
+    errs=$( (gunzip -c "$fl" | xtract -mixed -verify) 2>&1 )
+    if [ -n "$errs" ]
+    then
+      # delete and retry one more time
+      rm -f "$fl"
+      sleep 10
+      echo "Invalid Contents Retry" >&2
+      nquire -bulk -get "${url}" "$fl" > "$fl"
+      if [ -s "$fl" ]
+      then
+        errs=$( (gunzip -c "$fl" | xtract -mixed -verify) 2>&1 )
+        if [ -n "$errs" ]
+        then
+          rm -f "$fl"
+          frst=$( echo "$errs" | head -n 1 )
+          echo "ERROR invalid file '$fl' deleted, errors start with '$frst'" >&2
+        fi
+      fi
+    fi
+  else
+    rm -f "$fl"
+    echo "Download of '$fl' Failed" >&2
+  fi
+}
+
+DownloadSet() {
+
+  if [ "$useFtp" = true ]
+  then
+    nquire -lst ftp.ncbi.nlm.nih.gov genbank |
+    grep "seq.gz" | eval "$filt" | sort -V |
+    skip-if-file-exists |
+    while read fl
+    do
+      sleep 1
+      echo "$fl"
+      DownloadOneByFTP "$fl"
+    done
+  elif [ "$useHttps" = true ]
+  then
+    nquire -get https://ftp.ncbi.nlm.nih.gov genbank |
+    xtract -pattern a -if a -starts-with gb -and a -ends-with ".seq.gz" -element a |
+    eval "$filt" | sort -V |
+    skip-if-file-exists |
+    while read fl
+    do
+      sleep 1
+      echo "$fl"
+      DownloadOneByHTTPS "$fl"
+    done
+  fi
+}
+
+DownloadSet
+if [ $? -ne 0 ]
+then
+  DownloadSet
+fi
+
+exit 0

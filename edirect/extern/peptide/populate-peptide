@@ -1,0 +1,168 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# populate-peptide
+
+# archive-peptide -custom "ARC FUN PRO VRL"
+
+# tab-delimited HERE document to map informal division key to RefSeq file directory
+IFS='' read -r -d '' DIVMAP <<'EOF'
+ARC	archaea
+BCT	bacteria
+FUN	fungi
+INV	invertebrate
+MAM	vertebrate_mammalian
+MIT	mitochondrion
+PLN	plant
+PRO	protozoa
+PSM	plasmid
+PST	plastid
+VRL	viral
+VRT	vertebrate_other
+EOF
+
+# tab-delimited HERE document to map RefSeq file name component to division key
+IFS='' read -r -d '' TFORM <<'EOF'
+archaea	ARC
+bacteria	BCT
+fungi	FUN
+invertebrate	INV
+vertebrate_mammalian	MAM
+mitochondrion	MIT
+plant	PLN
+protozoa	PRO
+plasmid	PSM
+plastid	PST
+viral	VRL
+vertebrate_other	VRT
+EOF
+
+HighestSubfolder() {
+
+  ls -1d * |
+  grep -v CACHE |
+  grep -v Sentinels |
+  sed -e 's|/||g' |
+  grep -e '^[0-9][0-9]$' |
+  sort -n |
+  tail -n 1
+}
+
+# get current maximum UID from archive, use as offset for adding new peptide domains later
+
+HighestUID() {
+
+  max_uid="0"
+
+  cd "${archiveBase}"
+
+  fst=$( HighestSubfolder )
+  if [ -n "$fst" ]
+  then
+    cd "$fst"
+    snd=$( HighestSubfolder )
+    if [ -n "$snd" ]
+    then
+     cd "$snd"
+      lastFile=$( ls -1 * | sort -V | tail -n 1 )
+      if [ -n "$lastFile" ]
+      then
+        max_uid=$( cat "$lastFile" |
+          dd ibs=8000 skip=10 2> /dev/null | gunzip -c |
+          xtract -pattern PeptInfo -element UID |
+          sort -n | tail -n 1 )
+      fi
+    fi
+  fi
+
+  echo "$max_uid"
+}
+
+PeptideStash() {
+
+  fl="$1"
+
+  base=${fl%.gz}
+  pfx="${fl%%.*}"
+
+  division=$( echo "$TFORM" | grep "$pfx" | cut -f 2 )
+
+  cd "${archiveBase}"
+
+  lastUID="0"
+
+  lastUID=$( HighestUID )
+
+  if [ -z "$lastUID" ]
+  then
+    lastUID="0"
+  fi
+
+  cd "${sourceBase}"
+
+  printf '%12d    %s\n' $lastUID $base >&2
+
+  gunzip -c "$fl" |
+  gpf2info -start "$lastUID" -div "$division" |
+  env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -gzip -archive -db "$dbase" \
+    -index "$index" -pattern "$name"
+
+  touch "${sentinelsBase}/$base.snt"
+}
+
+GetRefSeqNames() {
+
+  keys="$1"
+
+  echo "$keys" | tr '\t' ' ' | tr '\n' ' ' | tr ',' ' ' | tr -s ' ' | tr ' ' '\n' |
+  while IFS=$'\t' read key
+  do
+    echo "$DIVMAP" | grep "$key"
+  done |
+  # first time AI Overview (for 'awk unique list but keep order') gave working result
+  awk '!a[$0]++'
+}
+
+PopulateRefSeqSection() {
+
+  dir="$1"
+
+  for fl in ${dir}*.gz
+  do
+    echo "$fl"
+  done |
+  sort -V |
+  while read fl
+  do
+    base=${fl%.gz}
+    # skip if sentinel present or if file is present but empty
+    if [ ! -f "${sentinelsBase}/$base.snt" ] && [ -s "$fl" ]
+    then
+      ( PeptideStash "$fl" )
+    fi
+  done
+}
+
+PopulateRefSeqDivisions() {
+
+  while IFS=$'\t' read key dir
+  do
+    echo "$key" >&2
+    PopulateRefSeqSection "$dir"
+  done
+}
+
+# cache next files, assign sequential UIDs starting one beyond the highest current UID in archive
+
+if [ -z "$custom" ] || [ "$custom" == "ALL" ]
+then
+  custom="ARC BCT FUN INV MAM MIT PLN PRO PSM PST VRT VRL"
+fi
+
+if [ -d "${archiveBase}" ] && [ -d "${sourceBase}" ]
+then
+  cd "${sourceBase}"
+
+  GetRefSeqNames "$custom" |
+  PopulateRefSeqDivisions >&2
+fi

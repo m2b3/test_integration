@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# test-repeat 'curl -fsSL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=2539356&rettype=native&retmode=xml"'
+# test-repeat 'curl -fsSL "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi" -d "db=pubmed&id=2539356&rettype=native&retmode=xml"'
+# test-repeat 'nquire -get https://eutils.ncbi.nlm.nih.gov/entrez/eutils/ efetch.fcgi -db pubmed -id 2539356 -rettype full -retmode xml'
+# test-repeat 'nquire -url https://eutils.ncbi.nlm.nih.gov/entrez/eutils/ efetch.fcgi -db pubmed -id 2539356 -rettype full -retmode xml'
+# test-repeat 'efetch -db pubmed -id 2539356 -format xml'
+
+export EDIRECT_NO_RETRY=true
+
+for i in $(seq 1 10)
+do
+  sleep 1
+  res=$( sh -c "$*" 2>&1 )
+  has=$( echo "$res" | grep "The requested URL returned error" )
+  if [ -n "$has" ]
+  then
+    echo "FAIL"
+  else
+    echo "PASS"
+  fi
+done

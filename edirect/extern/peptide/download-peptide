@@ -1,0 +1,184 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# download-peptide
+
+# tab-delimited HERE document to map informal division key to RefSeq file directory
+IFS='' read -r -d '' DIVMAP <<'EOF'
+ARC	archaea
+BCT	bacteria
+FUN	fungi
+INV	invertebrate
+MAM	vertebrate_mammalian
+MIT	mitochondrion
+PLN	plant
+PRO	protozoa
+PSM	plasmid
+PST	plastid
+VRL	viral
+VRT	vertebrate_other
+EOF
+
+GetRefSeqFolders() {
+
+  keys="$1"
+
+  echo "$keys" | tr '\t' ' ' | tr ',' ' ' | tr -s ' ' | tr ' ' '\n' |
+  while IFS=$'\t' read key
+  do
+    echo "$DIVMAP" | grep "$key"
+  done |
+  # first time AI Overview (for 'awk unique list but keep order') gave working result
+  awk '!a[$0]++'
+}
+
+FilterByDivision() {
+
+  dir="$1"
+
+  if [ "$dir" = "archaea" ]
+  then
+    grep "wp_"
+  elif [ "$dir" = "bacteria" ] || [ "$dir" = "plasmid" ]
+  then
+    grep "."
+  else
+    grep -v "wp_"
+  fi
+}
+
+DownloadRefSeq() {
+
+  fl="$1"
+
+  echo "$fl" | nquire -asp ftp.ncbi.nih.gov/refseq/release "$dir"
+
+  # delete if file is present but empty
+  if [ -f "$fl" ] && [ ! -s "$fl" ]
+  then
+    rm -f "$fl"
+  fi
+
+  # retry if no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "First Failed Download Retry" >&2
+    echo "$fl" | nquire -asp ftp.ncbi.nih.gov/refseq/release "$dir"
+  fi
+
+  # retry again if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 20
+    echo "Second Failed Download Retry" >&2
+    echo "$fl" | nquire -asp ftp.ncbi.nih.gov/refseq/release "$dir"
+  fi
+
+  # retry once more if still no file, using -dwn instead of -asp
+  if [ ! -f "$fl" ]
+  then
+    sleep 30
+    echo "Third Failed Download Retry" >&2
+    echo "$fl" | nquire -dwn ftp.ncbi.nih.gov/refseq/release "$dir"
+  fi
+
+  # verify contents
+  if [ -s "$fl" ]
+  then
+    errs=$( (gunzip -c "$fl" | gbf2xml | xtract -mixed -verify) 2>&1 )
+    if [ -n "$errs" ]
+    then
+      # delete and retry one more time
+      rm -f "$fl"
+      sleep 10
+      echo "Invalid Contents Retry" >&2
+      echo "$fl" | nquire -asp ftp.ncbi.nih.gov/refseq/release "$dir"
+      if [ -s "$fl" ]
+      then
+        errs=$( (gunzip -c "$fl" | gbf2xml | xtract -mixed -verify) 2>&1 )
+        if [ -n "$errs" ]
+        then
+          rm -f "$fl"
+          frst=$( echo "$errs" | head -n 1 )
+          echo "ERROR invalid file '$fl' deleted, errors start with '$frst'" >&2
+        fi
+      else
+        echo "Download Attempts Failed" >&2
+      fi
+    fi
+  else
+    rm -f "$fl"
+    echo "Download of '$fl' Failed" >&2
+  fi
+}
+
+DownloadRefSeqSection() {
+
+  dir="$1"
+
+  nquire -lst ftp://ftp.ncbi.nih.gov/refseq/release "$dir" < /dev/null |
+  grep gpff | FilterByDivision "$dir" | sort -V | skip-if-file-exists |
+  while read fl
+  do
+    sleep 1
+    echo "$fl" >&2
+    DownloadRefSeq "$fl"
+  done
+}
+
+DownloadRefSeqDivisions() {
+
+  while IFS=$'\t' read key dir
+  do
+    DownloadRefSeqSection "$dir"
+  done
+}
+
+MeasureRefSeq() {
+
+  while IFS=$'\t' read key dir
+  do
+    counts=$(
+      nquire -dir ftp://ftp.ncbi.nih.gov/refseq/release "$dir" |
+      grep gpff | FilterByDivision "$dir" | cut -f 1 |
+      print-columns '$1, NR, total += $1' | tail -n 1 | cut -f 2,3
+    )
+    echo -e "${key}\t${dir}\t${counts}"
+  done
+}
+
+all_divisions="ARC BCT FUN INV MAM MIT PLN PRO PSM PST VRT VRL"
+
+if [ -d "${sourceBase}" ]
+then
+  cd "${sourceBase}"
+
+  if [ -n "$custom" ]
+  then
+    # download GenPept files for selected divisions
+    if [ "$custom" = "ALL" ]
+    then
+      custom="$all_divisions"
+    elif [ "$custom" = "PRO" ]
+    then
+      custom="ARC BCT VRL"
+    fi
+    GetRefSeqFolders "$custom" |
+    DownloadRefSeqDivisions >&2
+  elif [ -n "$step" ] && [ "$step" = "DWN" ]
+  then
+    # if -step DWN without -custom, show total file counts and sizes for all divisions
+    echo "" >&2
+    GetRefSeqFolders "$all_divisions" |
+    MeasureRefSeq |
+    sort-table -k 1,1f |
+    align-columns -h 2 -g 4 -a llrm >&2
+    echo "" >&2
+  else
+    # download GenPept files for all divisions
+    custom="$all_divisions"
+    GetRefSeqFolders "$custom" |
+    DownloadRefSeqDivisions >&2
+  fi
+fi

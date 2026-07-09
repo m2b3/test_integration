@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# gff-sort
+
+# HERE document for mapping feature keys to sort order (other keys ending with RNA separately mapped to 2)
+IFS='' read -r -d '' TYPEMAP <<'EOF'
+gene	1
+pseudogene	1
+mRNA	2
+primary_transcript	2
+transcript	2
+C_region	2
+D_segment	2
+J_segment	2
+N_region	2
+S_region	2
+V_region	2
+V_segment	2
+CDS	3
+exon	4
+intron	4
+EOF
+
+temp1=$(mktemp /tmp/GFF_TEMP1.XXXXXXXXX)
+temp2=$(mktemp /tmp/GFF_TEMP2.XXXXXXXXX)
+
+grep '.' |
+sed '/^#/d' |
+# read GFF3 tab-delimited data into XML structure, taking field names from the command line
+tbl2xml -rec Rec SeqID Source Type Start End Score Strand Phase Attributes |
+# use xtract -with and -split arguments to separate individual tag=value attributes,
+# also use HERE document and suffix test to convert feature type to sort order number
+xtract -transform <( echo -e "$TYPEMAP" ) -rec Rec \
+  -pattern Rec \
+    -group Rec -pkg Fields \
+      -block "Rec/*" -element "*" \
+      -block Type -if Type -ends-with RNA -wrp Feat -lbl 2 \
+        -else -def 5 -wrp Feat -translate Type \
+    -group Rec -pkg Content -wrp Item -with ";" -split Attributes |
+# use xtract prefix and suffix trimming constructs to isolate tag and value, making new
+# XML objects with the extracted tag as the object name: <tag>value</tag>
+xtract -rec Rec \
+  -pattern Rec \
+    -group Fields -element "*" \
+    -group Content -pkg Content \
+      -block Item -TAG "Item[|=]" -wrp "&TAG" -element "Item[=|]" |
+transmute -mixed -format > $temp1
+
+cat "$temp1" |
+# generate table with identifier, parent, feature key, and sort order columns
+xtract -pattern Rec -if Content/ID \
+  -def "-" -element ID Parent Type Feat |
+# convert to table with identifier and calculated lineage columns
+transmute -p2l > $temp2
+
+cat "$temp1" |
+xtract -transform "$temp2" \
+  -pattern Rec \
+    -group "Fields/*" -element "~" \
+    -group Content -def "-" -IDENT -element ID -translate "&IDENT" |
+sort-table -k 1,1Vf -k 11,11f -k 7,7f -k 4,4n -k 5,5nr -k 10,10n |
+cut -f 1-9
+
+rm "$temp2"
+rm "$temp1"

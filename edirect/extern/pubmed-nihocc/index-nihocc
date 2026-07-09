@@ -1,0 +1,77 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-nihocc
+
+if [ -d "${scratchBase}" ]
+then
+  echo "Removing Previous Indices" >&2
+
+  target="${currentBase}"
+  find "$target" -name "*.xml" -delete
+  find "$target" -name "*.xml.gz" -delete
+
+  target="${indexedBase}"
+  find "$target" -name "*.e2x" -delete
+  find "$target" -name "*.e2x.gz" -delete
+
+  target="${invertedBase}"
+  find "$target" -name "*.inv" -delete
+  find "$target" -name "*.inv.gz" -delete
+fi
+
+if [ -d "${mergedBase}" ]
+then
+  target="${mergedBase}"
+  find "$target" -name "*.mrg" -delete
+  find "$target" -name "*.mrg.gz" -delete
+fi
+
+if [ -d "${indexedBase}" ]
+then
+  cd "${indexedBase}"
+
+  target="${indexedBase}"
+
+  # first try to obtain maximum live PMID value by local archive query
+  max_pmid=$(
+    xinfo -db pubmed -terms UID | tail -n 1 | tr -d '\n' | sed 's/^0*//'
+  )
+
+  # if unavailable from xinfo, and not -dark mode, get maximum PMID by Entrez query
+  if [ -z "$max_pmid" ] && [ "$darkMode" != true ]
+  then
+    sleep 2
+    max_pmid=$(
+      ecollect -db pubmed -subset "all [SB] NOT pubmed books [SB]" -retmax 1000 |
+      xtract -pattern eSearchResult -max Id
+    )
+  fi
+
+  # try one more time if first Entrez query failed
+  if [ -z "$max_pmid" ] && [ "$darkMode" != true ]
+  then
+    sleep 10
+    max_pmid=$(
+      ecollect -db pubmed -subset "all [SB] NOT pubmed books [SB]" -retmax 1000 |
+      xtract -pattern eSearchResult -max Id
+    )
+  fi
+
+  if [ -z "$max_pmid" ]
+  then
+    max_pmid="0"
+  fi
+
+  if [ -f "${extrasBase}/open_citation_collection.zip" ]
+  then
+    unzip -cq "${extrasBase}/open_citation_collection.zip" |
+    go run "${externBase}/${folder}/prep-nihocc.go" "$max_pmid" |
+    go run "${externBase}/prep-finish.go" 20000000 "$target" "nihocc"
+  elif [ -f "${extrasBase}/open_citation_collection.csv" ]
+  then
+    cat "${extrasBase}/open_citation_collection.csv" |
+    go run "${externBase}/${folder}/prep-nihocc.go" "$max_pmid" |
+    go run "${externBase}/prep-finish.go" 20000000 "$target" "nihocc"
+  fi
+fi
