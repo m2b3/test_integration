@@ -24,7 +24,7 @@ Environment (recommended):
   export NCBI_EMAIL="you@example.com"
   export NCBI_TOOL="my-pubmed-ingester"
   export NCBI_API_KEY="..."   # optional; allows higher rate limits
-  export EDIRECT_PREFIX="wsl" # optional; use EDirect via WSL on Windows
+  export EDIRECT_PREFIX="wsl" # optional; command prefix or EDirect directory
 
 Notes:
   - Pulling "everything in PubMed in the last 24h" can be large.
@@ -392,8 +392,7 @@ class EDirectStream:
         self._start(term, prefix)
 
     def _start(self, term: str, prefix: List[str]) -> None:
-        esearch_cmd = prefix + [
-            "esearch",
+        esearch_cmd = edirect_command(prefix, "esearch") + [
             "-db",
             "pubmed",
             "-query",
@@ -403,7 +402,7 @@ class EDirectStream:
             "-reldate",
             "1",
         ]
-        efetch_cmd = prefix + ["efetch", "-format", "xml"]
+        efetch_cmd = edirect_command(prefix, "efetch") + ["-format", "xml"]
         self._p1 = subprocess.Popen(esearch_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self._p2 = subprocess.Popen(efetch_cmd, stdin=self._p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         if self._p1.stdout:
@@ -455,10 +454,77 @@ def parse_edirect_prefix(raw: str) -> List[str]:
     return shlex.split(raw)
 
 
+def edirect_candidate_dirs() -> List[str]:
+    here = os.path.dirname(os.path.abspath(__file__))
+    parent = os.path.dirname(here)
+    return [
+        os.path.join(here, "edirect"),
+        os.path.join(parent, "igather2", "edirect"),
+    ]
+
+
+def resolve_edirect_prefix(raw: str) -> List[str]:
+    prefix = parse_edirect_prefix(raw)
+    if prefix:
+        return prefix
+    for candidate in edirect_candidate_dirs():
+        if os.path.isfile(os.path.join(candidate, "esearch")) and os.path.isfile(os.path.join(candidate, "efetch")):
+            return [candidate]
+    return []
+
+
+def edirect_command(prefix: List[str], executable: str) -> List[str]:
+    if len(prefix) == 1 and os.path.isdir(prefix[0]):
+        return [os.path.join(prefix[0], executable)]
+    return prefix + [executable]
+
+
 def edirect_available(prefix: List[str]) -> bool:
     if prefix:
-        return True
+        return all(
+            shutil.which(command[0]) or os.path.isfile(command[0])
+            for command in (
+                edirect_command(prefix, "esearch"),
+                edirect_command(prefix, "efetch"),
+            )
+        )
     return bool(shutil.which("esearch") and shutil.which("efetch"))
+
+
+def edirect_pubmed_ids(term: str, prefix: List[str]) -> List[str]:
+    esearch_cmd = edirect_command(prefix, "esearch") + [
+        "-db",
+        "pubmed",
+        "-query",
+        term,
+        "-datetype",
+        "edat",
+        "-reldate",
+        "1",
+    ]
+    efetch_cmd = edirect_command(prefix, "efetch") + ["-format", "uid"]
+    p1 = subprocess.Popen(esearch_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    p2 = subprocess.Popen(
+        efetch_cmd,
+        stdin=p1.stdout,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if p1.stdout:
+        p1.stdout.close()
+    stdout, stderr = p2.communicate()
+    p1.wait()
+    if p1.returncode not in (0, None):
+        raise RuntimeError(f"EDirect esearch failed (code {p1.returncode})")
+    if p2.returncode not in (0, None):
+        detail = (stderr or "").strip()
+        suffix = f": {detail}" if detail else ""
+        raise RuntimeError(f"EDirect efetch -format uid failed (code {p2.returncode}){suffix}")
+    ids = [line.strip() for line in stdout.splitlines() if line.strip().isdigit()]
+    if not ids:
+        raise RuntimeError("EDirect returned no PubMed IDs.")
+    return ids
 
 
 def _entrez_read_with_retries(open_request: Callable[[], object], label: str, max_retries: int = 3) -> object:
@@ -653,7 +719,7 @@ def main() -> int:
     ap.add_argument(
         "--edirect-prefix",
         default="",
-        help="Command prefix to invoke EDirect (e.g., 'wsl' on Windows).",
+        help="Command prefix or EDirect directory (default: bundled ./edirect or sibling ../igather2/edirect when present).",
     )
     ap.add_argument(
         "--max-tries",
@@ -699,7 +765,7 @@ def main() -> int:
         to_process = min(to_process, args.max)
         print(f"[info] Applying cap --max={args.max}; will process up to {to_process} PMIDs.")
 
-    prefix = parse_edirect_prefix(args.edirect_prefix or os.getenv("EDIRECT_PREFIX", ""))
+    prefix = resolve_edirect_prefix(args.edirect_prefix or os.getenv("EDIRECT_PREFIX", ""))
     edirect_ok = edirect_available(prefix)
     if args.edirect == "on" and not edirect_ok:
         print("[error] EDirect requested but not found. Set PATH or use --edirect-prefix.", file=sys.stderr)
@@ -720,70 +786,48 @@ def main() -> int:
         return 0
 
     if use_edirect:
-        print("[info] Using EDirect pipeline for retrieval.")
-        stream = EDirectStream(args.query, prefix)
-        batch: List[Dict[str, object]] = []
-        stopped_early = False
-        parse_error = False
+        print("[info] Using EDirect to retrieve PMID list, then fetching records in batches.")
         try:
-            for record in stream:
-                batch.append(record)
-                if len(batch) >= args.fetch_batch:
-                    pmids = [str(r["pmid"]) for r in batch if r.get("pmid")]
-                    total_seen += len(pmids)
-                    already = existing_pmids(conn, pmids)
-                    new_records = [r for r in batch if r.get("pmid") and r["pmid"] not in already]
-                    total_new += len(new_records)
-                    print(
-                        f"[page] fetched={len(pmids)} new={len(new_records)} "
-                        f"total_seen={total_seen}/{to_process}"
-                    )
-                    if new_records:
-                        inserted = insert_articles(conn, new_records)
-                        total_inserted += inserted
-                        print(f"[insert] parsed={len(batch)} inserted={inserted}")
-                    batch = []
-                    if args.max and total_seen >= to_process:
-                        stopped_early = True
-                        break
-
-            # Process any remaining records in the batch
-            if batch:
-                pmids = [str(r["pmid"]) for r in batch if r.get("pmid")]
-                total_seen += len(pmids)
-                already = existing_pmids(conn, pmids)
-                new_records = [r for r in batch if r.get("pmid") and r["pmid"] not in already]
-                total_new += len(new_records)
-                print(
-                    f"[page] fetched={len(pmids)} new={len(new_records)} "
-                    f"total_seen={total_seen}/{to_process}"
-                )
-                if new_records:
-                    inserted = insert_articles(conn, new_records)
-                    total_inserted += inserted
-                    print(f"[insert] parsed={len(batch)} inserted={inserted}")
-        except StopIteration:
-            # Normal end of stream
-            pass
+            ids = edirect_pubmed_ids(args.query, prefix)
         except Exception as e:
-            # Something went wrong (e.g., XML parse error)
-            print(f"[error] Error during EDirect processing: {e}", file=sys.stderr)
-            parse_error = True
-        finally:
-            # Force=True means we're cleaning up after early stop or error
-            stream.close(force=(stopped_early or parse_error))
+            print(f"[error] Error during EDirect PMID retrieval: {e}", file=sys.stderr)
+            conn.close()
+            return 1
+        if len(ids) != count:
+            print(f"[warn] EDirect returned {len(ids)} PMIDs but Entrez count was {count}.", file=sys.stderr)
+        to_process = min(to_process, len(ids))
+        retstart = args.start_from
+        if retstart > 0:
+            print(f"[info] Resuming from offset {retstart} (--start-from={retstart})")
+
+        while retstart < to_process:
+            this_batch = min(args.fetch_batch, to_process - retstart)
+            pmid_batch = ids[retstart : retstart + this_batch]
+            records = efetch_pubmed_by_ids(pmid_batch, max_retries=args.fetch_retries)
+            retstart += this_batch
+
+            pmids = [str(r["pmid"]) for r in records if r.get("pmid")]
+            total_seen += len(pmids)
+            already = existing_pmids(conn, pmids)
+            new_records = [r for r in records if r.get("pmid") and r["pmid"] not in already]
+            total_new += len(new_records)
+
+            print(
+                f"[page] retstart={retstart - this_batch} fetched={len(pmids)} "
+                f"new={len(new_records)} total_seen={retstart}/{to_process}"
+            )
+            print(f"[progress] To resume from this point if interrupted, use: --start-from {retstart}", file=sys.stderr)
+            if not new_records:
+                continue
+
+            inserted = insert_articles(conn, new_records)
+            total_inserted += inserted
+            print(f"[insert] parsed={len(records)} inserted={inserted}")
 
         print(
             f"[done] total_seen={total_seen} total_new={total_new} total_inserted={total_inserted} "
             f"db={args.db} at={utc_now_iso()}"
         )
-
-        if parse_error:
-            print("\n[info] Suggestions to avoid errors:", file=sys.stderr)
-            print("  1. Reduce batch size: --fetch-batch 50", file=sys.stderr)
-            print("  2. Limit total records: --max 5000", file=sys.stderr)
-            print("  3. Use Biopython instead: --edirect off", file=sys.stderr)
-            print("  4. Retry the same command - partial results were saved", file=sys.stderr)
 
         conn.close()
         return 0

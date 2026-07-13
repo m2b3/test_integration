@@ -78,6 +78,19 @@ python pipeline.py --fail-fast
 
 OpenReview/bluesky/mastodon is intentionally excluded from `pipeline.py`.
 
+For production, schedule `pipeline.py` as the single nightly job. Keep the
+individual source collectors (`arxiv.py`, `base.py`, and the other source
+scripts) as implementation modules and debugging entrypoints, but avoid
+separate cron jobs per source unless you specifically want independent source
+refresh schedules. A single orchestrator keeps cleanup, validation, merge,
+embedding, FTS, and manifest generation in one reproducible run.
+
+PubMed is configured to prefer EDirect automatically during the daily pipeline
+because broad 24-hour PubMed queries can exceed the Entrez history paging
+boundary. `base.py` will use EDirect from `./edirect`, from a sibling
+`../igather2/edirect` checkout, from `PATH`, or from `EDIRECT_PREFIX` when one
+is provided. If EDirect is unavailable, it falls back to Biopython Entrez.
+
 ### Pipeline outputs
 
 The combined paper build produces:
@@ -278,10 +291,18 @@ Biopython Entrez is the default retrieval path. NCBI EDirect is optional:
 
 ```bash
 python base.py --db pubmed.sqlite --edirect auto
+python base.py --db pubmed.sqlite --edirect on --edirect-prefix ../igather2/edirect
 python base.py --db pubmed.sqlite --edirect on --edirect-prefix wsl
 ```
 
-An optional `.env` file in the working directory may define `NCBI_EMAIL`, `NCBI_TOOL`, `NCBI_API_KEY`, and `EDIRECT_PREFIX`.
+When EDirect is enabled, `base.py` retrieves the full PMID list first and then
+fetches records by explicit PMID batches. This is the path used by
+`pipeline.py` for PubMed and is intended to avoid the `retstart=10000` failure
+seen with very broad PubMed day queries.
+
+An optional `.env` file in the working directory may define `NCBI_EMAIL`,
+`NCBI_TOOL`, `NCBI_API_KEY`, and `EDIRECT_PREFIX`. `EDIRECT_PREFIX` may be a
+command prefix such as `wsl` or a directory containing `esearch` and `efetch`.
 
 ### arXiv
 

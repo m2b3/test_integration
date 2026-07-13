@@ -131,7 +131,7 @@ def build_source_registry() -> dict[str, SourceConfig]:
             name="pubmed",
             script_name="base.py",
             database_name="pubmed.sqlite",
-            command_args=("--db", "pubmed.sqlite"),
+            command_args=("--db", "pubmed.sqlite", "--edirect", "auto"),
             expected_tables=("pubmed_articles",),
         ),
         "biorxiv": SourceConfig(
