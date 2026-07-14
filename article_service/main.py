@@ -5,7 +5,7 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from article_service.search_engine import ArtifactNotReadyError, ArticleSearchEngine, SearchMode
+from article_service.search_engine import ArtifactNotReadyError, ArticleSearchEngine, SearchMode, TagMatchMode
 
 
 ResolvedMode = Literal["none", "semantic", "keyword", "hybrid"]
@@ -94,18 +94,30 @@ def articles(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     date: str | None = None,
+    tags: str = "",
+    tag_match: TagMatchMode = "or",
     semantic_query: str = "",
     keyword_query: str = "",
     search_mode: str = "auto",
     pool_size: int = Query(default=100, ge=1, le=2000),
+    scope_semantic_query: str = "",
+    scope_limit: int = Query(default=1000, ge=1, le=5000),
     min_score: float | None = None,
     rrf_k: int = Query(default=60, ge=1),
     keyword_reserved: int = Query(default=3, ge=0),
 ) -> list[dict]:
     mode = resolve_mode(search_mode, semantic_query, keyword_query)
+    selected_tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
     try:
         if mode == "none":
-            return engine.articles(source=source, limit=limit, offset=offset, date=date)
+            return engine.articles(
+                source=source,
+                limit=limit,
+                offset=offset,
+                date=date,
+                tags=selected_tags,
+                tag_match=tag_match,
+            )
         return engine.search(
             mode=mode,
             semantic_query=semantic_query,
@@ -114,6 +126,10 @@ def articles(
             limit=limit,
             offset=offset,
             pool_size=pool_size,
+            tags=selected_tags,
+            tag_match=tag_match,
+            scope_semantic_query=scope_semantic_query,
+            scope_limit=scope_limit,
             min_score=min_score,
             rrf_k=rrf_k,
             keyword_reserved=keyword_reserved,
@@ -128,10 +144,14 @@ def search(
     source: str = "all",
     limit: int = Query(default=20, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    tags: str = "",
+    tag_match: TagMatchMode = "or",
     semantic_query: str = "",
     keyword_query: str = "",
     search_mode: str = "auto",
     pool_size: int = Query(default=100, ge=1, le=2000),
+    scope_semantic_query: str = "",
+    scope_limit: int = Query(default=1000, ge=1, le=5000),
     min_score: float | None = None,
     rrf_k: int = Query(default=60, ge=1),
     keyword_reserved: int = Query(default=3, ge=0),
@@ -139,6 +159,7 @@ def search(
     mode: SearchMode = resolve_mode(search_mode, semantic_query, keyword_query)
     if mode == "none":
         raise HTTPException(status_code=400, detail="Search requires semantic_query or keyword_query")
+    selected_tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
     try:
         return engine.search(
             mode=mode,
@@ -148,6 +169,10 @@ def search(
             limit=limit,
             offset=offset,
             pool_size=pool_size,
+            tags=selected_tags,
+            tag_match=tag_match,
+            scope_semantic_query=scope_semantic_query,
+            scope_limit=scope_limit,
             min_score=min_score,
             rrf_k=rrf_k,
             keyword_reserved=keyword_reserved,
@@ -155,4 +180,3 @@ def search(
     except Exception as exc:
         handle_error(exc)
         raise
-

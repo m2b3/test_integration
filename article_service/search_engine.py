@@ -22,6 +22,7 @@ from All_embedding import (
 
 
 SearchMode = Literal["none", "semantic", "keyword", "hybrid"]
+TagMatchMode = Literal["and", "or"]
 
 
 class ArtifactNotReadyError(RuntimeError):
@@ -52,6 +53,10 @@ def _as_list(value: Any) -> list[str]:
 
 def _authors_to_string(value: Any) -> str:
     return ", ".join(_as_list(value)) if isinstance(value, list) else str(value or "")
+
+
+def _clean_tags(tags: list[str] | str | None) -> list[str]:
+    return [tag.lower() for tag in _as_list(tags)]
 
 
 def normalize_article(item: dict[str, Any]) -> dict[str, Any]:
@@ -210,6 +215,8 @@ class ArticleSearchEngine:
         limit: int = 50,
         offset: int = 0,
         date: str | None = None,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
     ) -> list[dict[str, Any]]:
         self._require_sqlite()
         selected_source = _clean_source(source)
@@ -222,39 +229,73 @@ class ArticleSearchEngine:
             where.append("published_date = ?")
             params.append(date)
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        params.extend([limit, offset])
+        selected_tags = _clean_tags(tags)
+        if not selected_tags:
+            params.extend([limit, offset])
 
         with sqlite3.connect(f"file:{self.sqlite_path}?mode=ro", uri=True) as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                f"""
-                SELECT
-                    paper_key,
-                    source,
-                    external_id,
-                    title,
-                    abstract,
-                    authors,
-                    published_date,
-                    doi,
-                    journal,
-                    categories,
-                    url,
-                    pdf_url,
-                    category,
-                    primary_category,
-                    classification
-                FROM papers
-                {where_sql}
-                ORDER BY COALESCE(published_date, '') DESC,
-                         COALESCE(fetched_at, '') DESC,
-                         paper_key ASC
-                LIMIT ? OFFSET ?
-                """,
-                params,
-            ).fetchall()
+            if selected_tags:
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                        paper_key,
+                        source,
+                        external_id,
+                        title,
+                        abstract,
+                        authors,
+                        published_date,
+                        doi,
+                        journal,
+                        categories,
+                        url,
+                        pdf_url,
+                        category,
+                        primary_category,
+                        classification
+                    FROM papers
+                    {where_sql}
+                    ORDER BY COALESCE(published_date, '') DESC,
+                             COALESCE(fetched_at, '') DESC,
+                             paper_key ASC
+                    """,
+                    params,
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"""
+                    SELECT
+                        paper_key,
+                        source,
+                        external_id,
+                        title,
+                        abstract,
+                        authors,
+                        published_date,
+                        doi,
+                        journal,
+                        categories,
+                        url,
+                        pdf_url,
+                        category,
+                        primary_category,
+                        classification
+                    FROM papers
+                    {where_sql}
+                    ORDER BY COALESCE(published_date, '') DESC,
+                             COALESCE(fetched_at, '') DESC,
+                             paper_key ASC
+                    LIMIT ? OFFSET ?
+                    """,
+                    params,
+                ).fetchall()
 
-        return [normalize_article(dict(row)) for row in rows]
+        articles = [normalize_article(dict(row)) for row in rows]
+        if selected_tags:
+            articles = self._filter_by_tags(articles, selected_tags, tag_match)
+            articles = articles[offset : offset + limit]
+        return articles
 
     def search(
         self,
@@ -269,9 +310,14 @@ class ArticleSearchEngine:
         min_score: float | None = None,
         rrf_k: int = 60,
         keyword_reserved: int = 3,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+        scope_semantic_query: str = "",
+        scope_limit: int = 1000,
     ) -> list[dict[str, Any]]:
+        selected_tags = _clean_tags(tags)
         if mode == "none":
-            return self.articles(source=source, limit=limit, offset=offset)
+            return self.articles(source=source, limit=limit, offset=offset, tags=selected_tags, tag_match=tag_match)
         if limit <= 0:
             raise ValueError("limit must be greater than 0.")
         if offset < 0:
@@ -282,20 +328,28 @@ class ArticleSearchEngine:
         index, metadata, manifest = self._ensure_artifacts_loaded()
         selected_source = _clean_source(source)
         final_count = offset + limit
-        candidate_count = min(max(pool_size, final_count), len(metadata))
+        candidate_count = min(max(pool_size, final_count, scope_limit if scope_semantic_query.strip() else 0), len(metadata))
+        scope_keys = self._scope_paper_keys(
+            scope_semantic_query,
+            index,
+            metadata,
+            manifest,
+            scope_limit,
+            min_score,
+        )
 
         if mode == "semantic":
             query = semantic_query.strip() or keyword_query.strip()
             query_embedding = self._encode_query(query, manifest)
             results = search_semantic_pool(index, metadata, query_embedding, candidate_count, min_score)
-            return self._filter_and_slice(results, selected_source, offset, limit)
+            return self._filter_and_slice(results, selected_source, offset, limit, selected_tags, tag_match, scope_keys)
 
         if mode == "keyword":
             query = keyword_query.strip() or semantic_query.strip()
             if not query:
                 raise ValueError("Keyword query cannot be empty.")
             results = search_keyword_pool(str(self.sqlite_path), metadata, query, candidate_count)
-            return self._filter_and_slice(results, selected_source, offset, limit)
+            return self._filter_and_slice(results, selected_source, offset, limit, selected_tags, tag_match, scope_keys)
 
         if mode == "hybrid":
             semantic_text = semantic_query.strip() or keyword_query.strip()
@@ -319,6 +373,8 @@ class ArticleSearchEngine:
             )
             fused = reciprocal_rank_fusion(keyword_results, semantic_results, rrf_k)
             filtered = self._filter_by_source(fused, selected_source)
+            filtered = self._filter_by_scope(filtered, scope_keys)
+            filtered = self._filter_by_tags(filtered, selected_tags, tag_match)
             selection_limit = min(final_count, len(filtered))
             if selection_limit <= 0:
                 return []
@@ -345,12 +401,72 @@ class ArticleSearchEngine:
             if str(item.get("source") or "").strip().lower() == source
         ]
 
+    @staticmethod
+    def _filter_by_scope(results: list[dict[str, Any]], scope_keys: set[str] | None) -> list[dict[str, Any]]:
+        if not scope_keys:
+            return results
+        return [
+            item
+            for item in results
+            if str(item.get("paper_key") or item.get("id") or "").strip() in scope_keys
+        ]
+
+    @staticmethod
+    def _filter_by_tags(
+        results: list[dict[str, Any]],
+        tags: list[str],
+        tag_match: TagMatchMode,
+    ) -> list[dict[str, Any]]:
+        if not tags:
+            return results
+        required = set(tags)
+        matches_all = tag_match == "and"
+        filtered = []
+        for item in results:
+            article_tags = set(_clean_tags(item.get("tags") or item.get("categories")))
+            if not article_tags:
+                continue
+            if required.issubset(article_tags) if matches_all else bool(required & article_tags):
+                filtered.append(item)
+        return filtered
+
+    def _scope_paper_keys(
+        self,
+        scope_semantic_query: str,
+        index: Any,
+        metadata: list[dict[str, Any]],
+        manifest: dict[str, Any],
+        scope_limit: int,
+        min_score: float | None,
+    ) -> set[str] | None:
+        query = scope_semantic_query.strip()
+        if not query:
+            return None
+        query_embedding = self._encode_query(query, manifest)
+        scoped = search_semantic_pool(
+            index,
+            metadata,
+            query_embedding,
+            min(max(scope_limit, 1), len(metadata)),
+            min_score,
+        )
+        return {
+            str(item.get("paper_key") or item.get("id") or "").strip()
+            for item in scoped
+            if str(item.get("paper_key") or item.get("id") or "").strip()
+        }
+
     def _filter_and_slice(
         self,
         results: list[dict[str, Any]],
         source: str,
         offset: int,
         limit: int,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+        scope_keys: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         filtered = self._filter_by_source(results, source)
+        filtered = self._filter_by_scope(filtered, scope_keys)
+        filtered = self._filter_by_tags(filtered, tags or [], tag_match)
         return [normalize_article(item) for item in filtered[offset : offset + limit]]
