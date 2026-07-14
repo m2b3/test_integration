@@ -1,3 +1,5 @@
+import { normalizeAuthors, truncateText } from '../utils/articleFormat'
+
 function formatSource(source) {
   return source
     .split('-')
@@ -5,8 +7,13 @@ function formatSource(source) {
     .join(' ')
 }
 
-function ArticleCard({ article, onView }) {
-  const authors = Array.isArray(article.authors) ? article.authors.join(', ') : article.authors
+function formatArticleId(article) {
+  return article.paper_key || article.id || article.external_id || ''
+}
+
+function ArticleCard({ article, onTagClick, onView }) {
+  const authors = truncateText(normalizeAuthors(article.authors).join(', '))
+  const articleId = formatArticleId(article)
 
   function handleKeyDown(event) {
     if (!onView) {
@@ -28,15 +35,24 @@ function ArticleCard({ article, onView }) {
     >
       <div className="article-meta">
         <span>{formatSource(article.source)}</span>
+        {articleId && <span className="paper-id">[{articleId}]</span>}
         <span>{article.published_date}</span>
       </div>
       <h2>{article.title}</h2>
       <p className="authors">{authors}</p>
       <div className="tag-row" aria-label="Article tags">
-        {article.tags.map((tag) => (
-          <span className="tag-chip" key={tag}>
+        {(article.tags || []).map((tag) => (
+          <button
+            className="tag-chip tag-button"
+            key={tag}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onTagClick?.(tag)
+            }}
+          >
             {tag}
-          </span>
+          </button>
         ))}
       </div>
     </article>

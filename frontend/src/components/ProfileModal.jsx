@@ -18,7 +18,6 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
   const [authors, setAuthors] = useState(() => authorsToText(initialProfile?.authors))
   const [createdProfile, setCreatedProfile] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
-  const [showCreatePrompt, setShowCreatePrompt] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   function validateAccountFields() {
@@ -52,16 +51,10 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
         setCreatedProfile(profile)
         setTags(profile.tags || [])
         setAuthors(authorsToText(profile.authors))
-        setShowCreatePrompt(false)
         setStep('interests')
       }
     } catch (error) {
-      if (error.status === 404 && !createAccount) {
-        setShowCreatePrompt(true)
-        setErrorMessage(error.message)
-      } else {
-        setErrorMessage(error.message || 'Could not log in.')
-      }
+      setErrorMessage(error.message || 'Could not complete account request.')
     } finally {
       setIsSubmitting(false)
     }
@@ -119,35 +112,17 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
 
             {errorMessage && <p className="form-error">{errorMessage}</p>}
 
-            {showCreatePrompt && (
-              <div className="create-account-prompt">
-                <p>This email does not exist yet. Create a new user with this username and email?</p>
-                <div className="modal-actions">
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={() => {
-                      setShowCreatePrompt(false)
-                      setErrorMessage('')
-                    }}
-                  >
-                    Not now
-                  </button>
-                  <button
-                    className="primary-button"
-                    disabled={isSubmitting}
-                    type="button"
-                    onClick={() => submitAccount(true)}
-                  >
-                    Create user
-                  </button>
-                </div>
-              </div>
-            )}
-
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={onClose}>
                 Cancel
+              </button>
+              <button
+                className="secondary-button"
+                disabled={isSubmitting}
+                type="button"
+                onClick={() => submitAccount(true)}
+              >
+                Create account
               </button>
               <button className="primary-button" disabled={isSubmitting} type="submit">
                 Log in

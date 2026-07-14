@@ -1,3 +1,6 @@
+import { useEffect, useRef } from 'react'
+import { normalizeAuthors } from '../utils/articleFormat'
+
 function formatSource(source) {
   return source
     .split('-')
@@ -5,10 +8,29 @@ function formatSource(source) {
     .join(' ')
 }
 
-function ArticleDetailPage({ article, onBack }) {
-  const authors = Array.isArray(article.authors) ? article.authors.join(', ') : article.authors
+function MathText({ children }) {
+  const ref = useRef(null)
+
+  useEffect(() => {
+    if (window.MathJax?.typesetPromise && ref.current) {
+      window.MathJax.typesetPromise([ref.current]).catch((error) => {
+        console.error(error)
+      })
+    }
+  }, [children])
+
+  return (
+    <div className="math-text" ref={ref}>
+      {children}
+    </div>
+  )
+}
+
+function ArticleDetailPage({ article, onBack, onTagClick }) {
+  const authors = normalizeAuthors(article.authors).join(', ')
   const articleUrl = article.url || ''
   const abstract = article.abstract || 'Abstract placeholder text for this prototype.'
+  const articleId = article.paper_key || article.id || article.external_id || ''
 
   return (
     <section className="paper-page" aria-label="Paper detail">
@@ -19,6 +41,7 @@ function ArticleDetailPage({ article, onBack }) {
       <div className="paper-shell">
         <div className="article-meta">
           <span>{formatSource(article.source)}</span>
+          {articleId && <span className="paper-id">[{articleId}]</span>}
           <span>{article.published_date}</span>
         </div>
 
@@ -27,7 +50,7 @@ function ArticleDetailPage({ article, onBack }) {
 
         <section className="paper-section">
           <h3>Abstract</h3>
-          <p>{abstract}</p>
+          <MathText>{abstract}</MathText>
         </section>
 
         <section className="paper-section">
@@ -43,9 +66,14 @@ function ArticleDetailPage({ article, onBack }) {
 
         <div className="tag-row" aria-label="Article tags">
           {(article.tags || []).map((tag) => (
-            <span className="tag-chip" key={tag}>
+            <button
+              className="tag-chip tag-button"
+              key={tag}
+              type="button"
+              onClick={() => onTagClick?.(tag)}
+            >
               {tag}
-            </span>
+            </button>
           ))}
         </div>
       </div>

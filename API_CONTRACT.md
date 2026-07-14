@@ -49,8 +49,11 @@ Rules:
 ```text
 username and email are required
 email must be valid
-existing email requires matching username
-unknown email returns 404 unless create_account=true
+create_account=false logs in only an existing matching email/username pair
+create_account=true creates only when the email does not already exist
+existing email with create_account=true returns 409
+existing email with wrong username returns 401
+unknown email with create_account=false returns 404
 ```
 
 ## Feed Endpoints
@@ -79,7 +82,9 @@ GET /articles
 Shared query params:
 
 ```text
-source=all|arxiv|pubmed|biorxiv|medrxiv|psyarxiv|socarxiv
+source=all|arxiv|pubmed|openreview|biorxiv|medrxiv|psyarxiv|socarxiv
+tags=<comma-separated article category tags, e.g. math.NT,cs.LG>
+match=or|and
 semantic_query=<free text>
 keyword_query=<free text>
 search_mode=none|semantic|keyword|hybrid
@@ -97,9 +102,21 @@ both filled         -> hybrid
 neither filled      -> none
 ```
 
-The backend forwards these params to the article/search service. Recommended
-feed uses the user's saved interests/authors as a semantic query when the
-frontend has not provided an explicit search.
+The backend forwards these params to the article/search service. All Feed
+searches the whole article database and then applies source/tag filters.
+Recommended uses the user's saved interests/authors as a semantic query when
+the frontend has not provided an explicit search. When the frontend does
+provide a search under Recommended, the backend sends the user interest query
+as `scope_semantic_query` so article-service results are constrained to the
+approximate recommendation scope until a persisted `user_daily_feed` exists.
+
+Article-service-only params used behind the backend:
+
+```text
+tag_match=or|and
+scope_semantic_query=<user interests/authors>
+scope_limit=<maximum recommendation-scope candidate count>
+```
 
 ## User Interests
 

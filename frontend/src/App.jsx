@@ -20,7 +20,7 @@ import './App.css'
 
 const PROFILE_CACHE_KEY = 'scicommons.cachedProfile'
 const SOURCE_FILTER_KEY = 'scicommons.sourceFilter'
-const SOURCE_VALUES = new Set(['all', 'arxiv', 'pubmed'])
+const SOURCE_VALUES = new Set(['all', 'arxiv', 'pubmed', 'openreview'])
 const ARTICLE_PAGE_SIZE = 50
 
 function readJsonCache(key) {
@@ -56,6 +56,8 @@ function App() {
   const [keywordQuery, setKeywordQuery] = useState('')
   const [submittedSemanticQuery, setSubmittedSemanticQuery] = useState('')
   const [submittedKeywordQuery, setSubmittedKeywordQuery] = useState('')
+  const [selectedTags, setSelectedTags] = useState([])
+  const [submittedTags, setSubmittedTags] = useState([])
   const [source, setSource] = useState(() => readSourceFilter())
   const [profile, setProfile] = useState(() => readJsonCache(PROFILE_CACHE_KEY))
   const [activeFeed, setActiveFeed] = useState(() => (readJsonCache(PROFILE_CACHE_KEY) ? 'recommended' : 'all'))
@@ -128,6 +130,7 @@ function App() {
         keyword_query: submittedKeywordQuery,
         search_mode: searchMode,
         source,
+        tags: submittedTags,
         limit: ARTICLE_PAGE_SIZE,
         offset,
       }
@@ -144,7 +147,7 @@ function App() {
       }
       setHasMoreArticles(nextArticles.length === ARTICLE_PAGE_SIZE)
     },
-    [activeFeed, profile, searchMode, source, submittedKeywordQuery, submittedSemanticQuery],
+    [activeFeed, profile, searchMode, source, submittedKeywordQuery, submittedSemanticQuery, submittedTags],
   )
 
   useEffect(() => {
@@ -172,6 +175,7 @@ function App() {
             keyword_query: submittedKeywordQuery,
             search_mode: searchMode,
             source,
+            tags: submittedTags,
             limit: ARTICLE_PAGE_SIZE,
             offset: 0,
           })
@@ -203,6 +207,7 @@ function App() {
     source,
     submittedKeywordQuery,
     submittedSemanticQuery,
+    submittedTags,
   ])
 
   const loadMoreArticles = useCallback(async () => {
@@ -244,6 +249,28 @@ function App() {
   function handleSearchSubmit() {
     setSubmittedSemanticQuery(semanticQuery)
     setSubmittedKeywordQuery(keywordQuery)
+    setSubmittedTags(selectedTags)
+  }
+
+  function addSelectedTag(tag) {
+    setSelectedTags((currentTags) => [...new Set([...currentTags, tag.trim()].filter(Boolean))])
+  }
+
+  function removeSelectedTag(tag) {
+    setSelectedTags((currentTags) => currentTags.filter((currentTag) => currentTag !== tag))
+  }
+
+  function handleArticleTagClick(tag) {
+    const nextTags = [tag]
+    setSelectedTags(nextTags)
+    setSubmittedTags(nextTags)
+    setSubmittedSemanticQuery('')
+    setSubmittedKeywordQuery('')
+    setSemanticQuery('')
+    setKeywordQuery('')
+    setSource('all')
+    setActiveFeed('all')
+    setActivePage('feed')
   }
 
   async function handleProfileLogin(nextProfile) {
@@ -341,6 +368,7 @@ function App() {
         <ArticleDetailPage
           article={selectedArticle}
           onBack={() => setActivePage('feed')}
+          onTagClick={handleArticleTagClick}
         />
       )
     }
@@ -404,7 +432,10 @@ function App() {
           onSemanticQueryChange={setSemanticQuery}
           onSearch={handleSearchSubmit}
           onSourceChange={setSource}
+          onTagAdd={addSelectedTag}
+          onTagRemove={removeSelectedTag}
           searchMode={visibleSearchMode}
+          selectedTags={selectedTags}
           semanticQuery={semanticQuery}
           source={source}
         />
@@ -421,6 +452,7 @@ function App() {
             <ArticleCard
               key={article.paper_key}
               article={article}
+              onTagClick={handleArticleTagClick}
               onView={handleArticleOpen}
             />
           ))}

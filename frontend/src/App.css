@@ -160,7 +160,7 @@
   align-items: end;
   display: grid;
   gap: 10px;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr minmax(180px, 0.7fr);
 }
 
 .field {
@@ -315,8 +315,16 @@ select:focus {
   font-size: 13px;
   gap: 6px;
   line-height: 1;
-  min-height: 28px;
-  padding: 6px 10px;
+  min-height: 22px;
+  padding: 4px 8px;
+}
+
+.tag-button {
+  cursor: pointer;
+}
+
+.tag-button:hover {
+  border-color: var(--border-strong);
 }
 
 .selected-tags .clear-button {
@@ -375,6 +383,11 @@ select:focus {
   margin: 8px 0 10px;
 }
 
+.paper-id {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
 .article-meta {
   color: var(--muted);
   display: flex;
@@ -387,6 +400,12 @@ select:focus {
 .authors {
   color: var(--text);
   margin: 0 0 16px;
+}
+
+.math-text {
+  color: var(--text);
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .tag-row {
@@ -790,7 +809,7 @@ select:focus {
 
   .source-control {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .feed-summary {

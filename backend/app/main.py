@@ -138,6 +138,8 @@ def article_service_get(path: str, params: dict[str, object]) -> object:
 def article_service_params(
     *,
     source: str,
+    tags: list[str],
+    tag_match: MatchMode,
     q: str,
     semantic_query: str,
     keyword_query: str,
@@ -145,13 +147,17 @@ def article_service_params(
     date_filter: date | None,
     limit: int,
     offset: int,
+    scope_semantic_query: str = "",
 ) -> dict[str, object]:
     effective_keyword_query = keyword_query.strip() or q.strip()
     return {
         "source": source,
+        "tags": ",".join(tags),
+        "tag_match": tag_match,
         "semantic_query": semantic_query.strip(),
         "keyword_query": effective_keyword_query,
         "search_mode": search_mode,
+        "scope_semantic_query": scope_semantic_query.strip(),
         "date": date_filter.isoformat() if date_filter is not None else None,
         "limit": limit,
         "offset": offset,
@@ -391,20 +397,19 @@ def get_articles(
     offset: int = Query(default=0, ge=0),
     date_filter: date | None = Query(default=None, alias="date"),
 ) -> list[dict]:
-    tag_query = " ".join(parse_tags(tags))
-    effective_semantic_query = semantic_query.strip() or tag_query
+    selected_tags = parse_tags(tags)
     params = article_service_params(
         source=source,
+        tags=selected_tags,
+        tag_match=match,
         q=q,
-        semantic_query=effective_semantic_query,
+        semantic_query=semantic_query,
         keyword_query=keyword_query,
         search_mode=search_mode,
         date_filter=date_filter,
         limit=limit,
         offset=offset,
     )
-    if tags and search_mode == "auto":
-        params["search_mode"] = "semantic"
     return article_service_get("/articles", params)  # type: ignore[return-value]
 
 
@@ -428,22 +433,25 @@ def get_user_feed(
         require_user_session(request, cur, user_id)
         recommendation_query = user_recommendation_query(cur, user_id)
 
-    explicit_query = bool(semantic_query.strip() or keyword_query.strip() or q.strip() or parse_tags(tags))
+    selected_tags = parse_tags(tags)
+    explicit_query = bool(semantic_query.strip() or keyword_query.strip() or q.strip())
     effective_semantic_query = semantic_query.strip()
+    scope_semantic_query = ""
     if not explicit_query and recommendation_query:
         effective_semantic_query = recommendation_query
         search_mode = "semantic"
-    elif tags and not effective_semantic_query:
-        effective_semantic_query = " ".join(parse_tags(tags))
-        if search_mode == "auto":
-            search_mode = "semantic"
+    elif explicit_query and recommendation_query:
+        scope_semantic_query = recommendation_query
 
     params = article_service_params(
         source=source,
+        tags=selected_tags,
+        tag_match=match,
         q=q,
         semantic_query=effective_semantic_query,
         keyword_query=keyword_query,
         search_mode=search_mode,
+        scope_semantic_query=scope_semantic_query,
         date_filter=date_filter,
         limit=limit,
         offset=offset,
@@ -499,28 +507,32 @@ def login(
         cur.execute("SELECT id, email, username FROM users WHERE email = %s", [email])
         user = cur.fetchone()
 
-        if user is None:
-            if not payload.create_account:
+        if payload.create_account:
+            if user is not None:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="No account exists for this email. Create a new account?",
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="An account already exists for this email. Log in instead.",
                 )
 
-            user_id = "demo-" + email.replace("@", "-").replace(".", "-")
+            user_id = "user-" + secrets.token_hex(8)
             cur.execute(
                 """
                 INSERT INTO users (id, email, username)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email
                 RETURNING id, email, username
                 """,
                 [user_id, email, username],
             )
             user = cur.fetchone()
+        elif user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No matching email and username pair exists.",
+            )
         elif user["username"] != username:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Username does not match this email",
+                detail="Username does not match this email.",
             )
 
         token = create_session(cur, user["id"])

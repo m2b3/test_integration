@@ -2,6 +2,7 @@ const SOURCE_OPTIONS = [
   { id: 'all', label: 'All' },
   { id: 'arxiv', label: 'arXiv' },
   { id: 'pubmed', label: 'PubMed' },
+  { id: 'openreview', label: 'OpenReview' },
 ]
 
 function SearchBar({
@@ -10,13 +11,29 @@ function SearchBar({
   onSemanticQueryChange,
   onSearch,
   onSourceChange,
+  onTagAdd,
+  onTagRemove,
   searchMode,
+  selectedTags,
   semanticQuery,
   source,
 }) {
   function handleSubmit(event) {
     event.preventDefault()
     onSearch()
+  }
+
+  function handleTagKeyDown(event) {
+    if (event.key !== 'Enter') {
+      return
+    }
+    event.preventDefault()
+    const value = event.currentTarget.value.trim()
+    if (!value) {
+      return
+    }
+    onTagAdd(value)
+    event.currentTarget.value = ''
   }
 
   return (
@@ -41,7 +58,27 @@ function SearchBar({
             value={keywordQuery}
           />
         </label>
+
+        <label className="field tag-filter-field">
+          <span>Category tag</span>
+          <input
+            onKeyDown={handleTagKeyDown}
+            placeholder="Press Enter to add, e.g. math.NT"
+            type="text"
+          />
+        </label>
       </div>
+
+      {selectedTags.length > 0 && (
+        <div className="selected-tags" aria-label="Selected article tags">
+          {selectedTags.map((tag) => (
+            <button key={tag} type="button" onClick={() => onTagRemove(tag)}>
+              {tag}
+              <span aria-hidden="true">x</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="search-footer">
         <div className="source-control" aria-label="Source filter">
