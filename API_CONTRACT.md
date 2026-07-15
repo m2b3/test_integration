@@ -91,6 +91,7 @@ search_mode=none|semantic|keyword|hybrid
 date=YYYY-MM-DD
 limit=<page size>
 offset=<starting row>
+include_total=true|false
 ```
 
 Frontend search mode rule:
@@ -117,6 +118,18 @@ tag_match=or|and
 scope_semantic_query=<user interests/authors>
 scope_limit=<maximum recommendation-scope candidate count>
 ```
+
+When `include_total=true`, feed endpoints return a paged object:
+
+```json
+{
+  "items": [{ "paper_key": "arxiv:2507.12345" }],
+  "total": 5535
+}
+```
+
+Without `include_total=true`, the endpoints preserve the older behavior and
+return only the article list.
 
 ## User Interests
 

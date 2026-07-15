@@ -52,6 +52,7 @@ function App() {
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [isSessionLoading, setIsSessionLoading] = useState(true)
   const [hasMoreArticles, setHasMoreArticles] = useState(true)
+  const [articleTotal, setArticleTotal] = useState(null)
   const [semanticQuery, setSemanticQuery] = useState('')
   const [keywordQuery, setKeywordQuery] = useState('')
   const [submittedSemanticQuery, setSubmittedSemanticQuery] = useState('')
@@ -133,19 +134,27 @@ function App() {
         tags: submittedTags,
         limit: ARTICLE_PAGE_SIZE,
         offset,
+        include_total: true,
       }
 
-      const nextArticles =
+      const response =
         activeFeed === 'recommended' && profile
           ? await getUserFeed(profile.user_id, filters)
           : await getArticles(filters)
+      const nextArticles = Array.isArray(response) ? response : response.items || []
+      const nextTotal = Number.isInteger(response?.total) ? response.total : null
 
       if (replace) {
         setArticles(nextArticles)
+        setArticleTotal(nextTotal)
       } else {
         setArticles((currentArticles) => [...currentArticles, ...nextArticles])
       }
-      setHasMoreArticles(nextArticles.length === ARTICLE_PAGE_SIZE)
+      setHasMoreArticles(
+        nextTotal === null
+          ? nextArticles.length === ARTICLE_PAGE_SIZE
+          : offset + nextArticles.length < nextTotal,
+      )
     },
     [activeFeed, profile, searchMode, source, submittedKeywordQuery, submittedSemanticQuery, submittedTags],
   )
@@ -178,10 +187,18 @@ function App() {
             tags: submittedTags,
             limit: ARTICLE_PAGE_SIZE,
             offset: 0,
+            include_total: true,
           })
+          const nextPublicArticles = Array.isArray(publicArticles) ? publicArticles : publicArticles.items || []
+          const nextTotal = Number.isInteger(publicArticles?.total) ? publicArticles.total : null
           if (isActive) {
-            setArticles(publicArticles)
-            setHasMoreArticles(publicArticles.length === ARTICLE_PAGE_SIZE)
+            setArticles(nextPublicArticles)
+            setArticleTotal(nextTotal)
+            setHasMoreArticles(
+              nextTotal === null
+                ? nextPublicArticles.length === ARTICLE_PAGE_SIZE
+                : nextPublicArticles.length < nextTotal,
+            )
           }
         } else {
           console.error(error)
@@ -271,6 +288,16 @@ function App() {
     setSource('all')
     setActiveFeed('all')
     setActivePage('feed')
+  }
+
+  function formatFeedCount() {
+    if (isLoading) {
+      return 'Loading articles'
+    }
+    if (articleTotal === null) {
+      return `${articles.length.toLocaleString()} loaded`
+    }
+    return `${articleTotal.toLocaleString()} articles · ${articles.length.toLocaleString()} loaded`
   }
 
   async function handleProfileLogin(nextProfile) {
@@ -441,7 +468,7 @@ function App() {
         />
 
         <div className="feed-summary">
-          <span>{isLoading ? 'Loading articles' : `${articles.length} articles`}</span>
+          <span>{formatFeedCount()}</span>
           <span>
             {activeFeed === 'recommended' ? 'Recommended feed' : "Yesterday's all feed"}
           </span>

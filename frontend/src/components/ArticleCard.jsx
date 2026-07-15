@@ -1,4 +1,5 @@
 import { normalizeAuthors, truncateText } from '../utils/articleFormat'
+import MathText from './MathText'
 
 function formatSource(source) {
   return source
@@ -38,7 +39,9 @@ function ArticleCard({ article, onTagClick, onView }) {
         {articleId && <span className="paper-id">[{articleId}]</span>}
         <span>{article.published_date}</span>
       </div>
-      <h2>{article.title}</h2>
+      <h2>
+        <MathText>{article.title}</MathText>
+      </h2>
       <p className="authors">{authors}</p>
       <div className="tag-row" aria-label="Article tags">
         {(article.tags || []).map((tag) => (

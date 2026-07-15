@@ -1,29 +1,11 @@
-import { useEffect, useRef } from 'react'
 import { normalizeAuthors } from '../utils/articleFormat'
+import MathText from './MathText'
 
 function formatSource(source) {
   return source
     .split('-')
     .map((word) => word[0].toUpperCase() + word.slice(1))
     .join(' ')
-}
-
-function MathText({ children }) {
-  const ref = useRef(null)
-
-  useEffect(() => {
-    if (window.MathJax?.typesetPromise && ref.current) {
-      window.MathJax.typesetPromise([ref.current]).catch((error) => {
-        console.error(error)
-      })
-    }
-  }, [children])
-
-  return (
-    <div className="math-text" ref={ref}>
-      {children}
-    </div>
-  )
 }
 
 function ArticleDetailPage({ article, onBack, onTagClick }) {
@@ -45,12 +27,14 @@ function ArticleDetailPage({ article, onBack, onTagClick }) {
           <span>{article.published_date}</span>
         </div>
 
-        <h2>{article.title}</h2>
+        <h2>
+          <MathText>{article.title}</MathText>
+        </h2>
         <p className="authors">{authors}</p>
 
         <section className="paper-section">
           <h3>Abstract</h3>
-          <MathText>{abstract}</MathText>
+          <MathText as="div" className="math-text">{abstract}</MathText>
         </section>
 
         <section className="paper-section">

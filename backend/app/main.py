@@ -147,6 +147,7 @@ def article_service_params(
     date_filter: date | None,
     limit: int,
     offset: int,
+    include_total: bool = False,
     scope_semantic_query: str = "",
 ) -> dict[str, object]:
     effective_keyword_query = keyword_query.strip() or q.strip()
@@ -161,6 +162,7 @@ def article_service_params(
         "date": date_filter.isoformat() if date_filter is not None else None,
         "limit": limit,
         "offset": offset,
+        "include_total": "true" if include_total else "",
     }
 
 
@@ -395,8 +397,9 @@ def get_articles(
     search_mode: str = "auto",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_total: bool = False,
     date_filter: date | None = Query(default=None, alias="date"),
-) -> list[dict]:
+) -> list[dict] | dict:
     selected_tags = parse_tags(tags)
     params = article_service_params(
         source=source,
@@ -409,6 +412,7 @@ def get_articles(
         date_filter=date_filter,
         limit=limit,
         offset=offset,
+        include_total=include_total,
     )
     return article_service_get("/articles", params)  # type: ignore[return-value]
 
@@ -427,8 +431,9 @@ def get_user_feed(
     search_mode: str = "auto",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_total: bool = False,
     date_filter: date | None = Query(default=None, alias="date"),
-) -> list[dict]:
+) -> list[dict] | dict:
     with conn.cursor() as cur:
         require_user_session(request, cur, user_id)
         recommendation_query = user_recommendation_query(cur, user_id)
@@ -455,6 +460,7 @@ def get_user_feed(
         date_filter=date_filter,
         limit=limit,
         offset=offset,
+        include_total=include_total,
     )
     return article_service_get("/articles", params)  # type: ignore[return-value]
 

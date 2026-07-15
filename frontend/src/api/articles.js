@@ -43,6 +43,10 @@ function buildArticleQuery(filters = {}) {
     params.set('offset', String(filters.offset))
   }
 
+  if (filters.include_total) {
+    params.set('include_total', 'true')
+  }
+
   const query = params.toString()
   return query ? `?${query}` : ''
 }
