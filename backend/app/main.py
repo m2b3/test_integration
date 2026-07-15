@@ -25,6 +25,8 @@ MatchMode = Literal["and", "or"]
 SESSION_COOKIE_NAME = "scicommons_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+USER_DAILY_FEED_SIZE = 500
+ARTICLE_SERVICE_PAGE_SIZE = 200
 
 
 app = FastAPI(title="Scicommons Prototype API")
@@ -149,10 +151,12 @@ def article_service_params(
     offset: int,
     include_total: bool = False,
     scope_semantic_query: str = "",
+    paper_keys: list[str] | None = None,
 ) -> dict[str, object]:
     effective_keyword_query = keyword_query.strip() or q.strip()
     return {
         "source": source,
+        "paper_keys": ",".join(paper_keys or []),
         "tags": ",".join(tags),
         "tag_match": tag_match,
         "semantic_query": semantic_query.strip(),
@@ -316,6 +320,102 @@ def user_recommendation_query(cur: psycopg.Cursor, user_id: str) -> str:
     return " ".join(clean_unique_strings(values))
 
 
+def article_key(article: dict) -> str:
+    return str(article.get("paper_key") or article.get("id") or "").strip()
+
+
+def cleanup_expired_user_daily_feeds(cur: psycopg.Cursor, feed_date: date) -> None:
+    cur.execute("DELETE FROM user_daily_feed WHERE feed_date < %s", [feed_date])
+
+
+def invalidate_user_daily_feed(cur: psycopg.Cursor, user_id: str) -> None:
+    cur.execute("DELETE FROM user_daily_feed WHERE user_id = %s", [user_id])
+
+
+def get_stored_daily_feed_keys(cur: psycopg.Cursor, user_id: str, feed_date: date) -> list[str]:
+    cur.execute(
+        """
+        SELECT article_key
+        FROM user_daily_feed
+        WHERE user_id = %s
+          AND feed_date = %s
+        ORDER BY rank ASC
+        """,
+        [user_id, feed_date],
+    )
+    return [row["article_key"] for row in cur.fetchall()]
+
+
+def store_daily_feed_keys(
+    cur: psycopg.Cursor,
+    user_id: str,
+    feed_date: date,
+    article_keys: list[str],
+) -> list[str]:
+    unique_keys = list(dict.fromkeys(key for key in article_keys if key))
+    cur.execute(
+        "DELETE FROM user_daily_feed WHERE user_id = %s AND feed_date = %s",
+        [user_id, feed_date],
+    )
+    if unique_keys:
+        cur.executemany(
+            """
+            INSERT INTO user_daily_feed (user_id, feed_date, article_key, rank)
+            VALUES (%s, %s, %s, %s)
+            """,
+            [
+                (user_id, feed_date, key, index + 1)
+                for index, key in enumerate(unique_keys)
+            ],
+        )
+    return unique_keys
+
+
+def generate_daily_feed_keys(recommendation_query: str) -> list[str]:
+    query = recommendation_query.strip()
+    if not query:
+        return []
+
+    keys: list[str] = []
+    offset = 0
+    while len(keys) < USER_DAILY_FEED_SIZE:
+        page_limit = min(ARTICLE_SERVICE_PAGE_SIZE, USER_DAILY_FEED_SIZE - len(keys))
+        page = article_service_get(
+            "/articles",
+            {
+                "source": "all",
+                "semantic_query": query,
+                "search_mode": "semantic",
+                "limit": page_limit,
+                "offset": offset,
+            },
+        )
+        if not isinstance(page, list) or not page:
+            break
+
+        keys.extend(article_key(article) for article in page)
+        offset += len(page)
+        if len(page) < page_limit:
+            break
+
+    return list(dict.fromkeys(key for key in keys if key))
+
+
+def ensure_user_daily_feed(
+    cur: psycopg.Cursor,
+    user_id: str,
+    recommendation_query: str,
+    feed_date: date,
+) -> list[str]:
+    cleanup_expired_user_daily_feeds(cur, feed_date)
+    stored_keys = get_stored_daily_feed_keys(cur, user_id, feed_date)
+    if stored_keys:
+        return stored_keys
+
+    generated_keys = generate_daily_feed_keys(recommendation_query)
+    return store_daily_feed_keys(cur, user_id, feed_date, generated_keys)
+
+
 def replace_user_tags(cur: psycopg.Cursor, user_id: str, tags: list[str]) -> list[str]:
     unique_tags = clean_unique_strings(tags)
 
@@ -437,16 +537,18 @@ def get_user_feed(
     with conn.cursor() as cur:
         require_user_session(request, cur, user_id)
         recommendation_query = user_recommendation_query(cur, user_id)
+        feed_date = date_filter or date.today()
+        feed_keys = ensure_user_daily_feed(cur, user_id, recommendation_query, feed_date)
+
+    if not feed_keys:
+        empty_response: dict[str, object] = {"items": [], "total": 0}
+        return empty_response if include_total else []
 
     selected_tags = parse_tags(tags)
     explicit_query = bool(semantic_query.strip() or keyword_query.strip() or q.strip())
     effective_semantic_query = semantic_query.strip()
-    scope_semantic_query = ""
-    if not explicit_query and recommendation_query:
-        effective_semantic_query = recommendation_query
-        search_mode = "semantic"
-    elif explicit_query and recommendation_query:
-        scope_semantic_query = recommendation_query
+    if not explicit_query:
+        search_mode = "none"
 
     params = article_service_params(
         source=source,
@@ -456,11 +558,11 @@ def get_user_feed(
         semantic_query=effective_semantic_query,
         keyword_query=keyword_query,
         search_mode=search_mode,
-        scope_semantic_query=scope_semantic_query,
         date_filter=date_filter,
         limit=limit,
         offset=offset,
         include_total=include_total,
+        paper_keys=feed_keys,
     )
     return article_service_get("/articles", params)  # type: ignore[return-value]
 
@@ -581,6 +683,7 @@ def update_user_tags(
         if cur.fetchone() is None:
             raise HTTPException(status_code=404, detail="User not found")
         unique_tags = replace_user_tags(cur, user_id, payload.tags)
+        invalidate_user_daily_feed(cur, user_id)
 
     return {
         "user_id": user_id,
@@ -616,6 +719,8 @@ def update_user_profile(
             replace_user_tags(cur, user_id, payload.tags)
         if payload.authors is not None:
             replace_user_authors(cur, user_id, payload.authors)
+        if payload.tags is not None or payload.authors is not None:
+            invalidate_user_daily_feed(cur, user_id)
 
         return get_profile(cur, user_id)
 

@@ -112,11 +112,23 @@ CREATE TABLE user_recently_viewed (
     PRIMARY KEY (user_id, article_key)
 );
 
+CREATE TABLE user_daily_feed (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    feed_date DATE NOT NULL,
+    article_key TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, feed_date, article_key),
+    UNIQUE (user_id, feed_date, rank)
+);
+
 CREATE INDEX idx_user_tags_tag_id ON user_tags(tag_id);
 CREATE INDEX idx_user_authors_author_name ON user_authors(author_name);
 CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
 CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 CREATE INDEX idx_user_recently_viewed_viewed_at ON user_recently_viewed(user_id, viewed_at DESC);
+CREATE INDEX idx_user_daily_feed_lookup ON user_daily_feed(user_id, feed_date, rank);
+CREATE INDEX idx_user_daily_feed_date ON user_daily_feed(feed_date);
 """
 
 

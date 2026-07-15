@@ -72,6 +72,22 @@ GET /users/{user_id}/feed
 ```
 
 User-specific endpoints require the active session cookie to match `{user_id}`.
+Recommended uses the `user_daily_feed` table as a short-lived per-user cache:
+
+```text
+user_id
+feed_date
+article_key
+rank
+created_at
+```
+
+Rows older than the requested/current feed date are deleted when a user feed is
+requested. If today's feed is missing, the backend generates ranked article
+keys from the user's saved interests/authors, stores up to the configured feed
+size, then searches/filters within those stored keys. When interests/authors
+change, the cached feed for that user is invalidated and regenerated on the
+next Recommended request.
 
 All Feed does not require login:
 
@@ -105,15 +121,15 @@ neither filled      -> none
 
 The backend forwards these params to the article/search service. All Feed
 searches the whole article database and then applies source/tag filters.
-Recommended uses the user's saved interests/authors as a semantic query when
-the frontend has not provided an explicit search. When the frontend does
-provide a search under Recommended, the backend sends the user interest query
-as `scope_semantic_query` so article-service results are constrained to the
-approximate recommendation scope until a persisted `user_daily_feed` exists.
+Recommended first resolves today's `user_daily_feed` article keys. Without an
+explicit search, those keys are returned in stored rank order. With an explicit
+search, article-service searches within those keys and then applies source/tag
+filters.
 
 Article-service-only params used behind the backend:
 
 ```text
+paper_keys=<comma-separated article keys for user_daily_feed scope>
 tag_match=or|and
 scope_semantic_query=<user interests/authors>
 scope_limit=<maximum recommendation-scope candidate count>
