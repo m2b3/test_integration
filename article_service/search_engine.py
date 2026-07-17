@@ -297,6 +297,120 @@ class ArticleSearchEngine:
             articles = articles[offset : offset + limit]
         return articles
 
+    def article_page(
+        self,
+        *,
+        source: str = "all",
+        limit: int = 50,
+        offset: int = 0,
+        date: str | None = None,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+    ) -> dict[str, Any]:
+        return {
+            "items": self.articles(
+                source=source,
+                limit=limit,
+                offset=offset,
+                date=date,
+                tags=tags,
+                tag_match=tag_match,
+            ),
+            "total": self.count_articles(
+                source=source,
+                date=date,
+                tags=tags,
+                tag_match=tag_match,
+            ),
+        }
+
+    def articles_by_keys(
+        self,
+        *,
+        paper_keys: list[str],
+        source: str = "all",
+        limit: int = 50,
+        offset: int = 0,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+    ) -> list[dict[str, Any]]:
+        articles = self._articles_for_keys(paper_keys)
+        selected_source = _clean_source(source)
+        selected_tags = _clean_tags(tags)
+        filtered = self._filter_by_source(articles, selected_source)
+        filtered = self._filter_by_tags(filtered, selected_tags, tag_match)
+        return [normalize_article(item) for item in filtered[offset : offset + limit]]
+
+    def article_page_by_keys(
+        self,
+        *,
+        paper_keys: list[str],
+        source: str = "all",
+        limit: int = 50,
+        offset: int = 0,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+    ) -> dict[str, Any]:
+        articles = self._articles_for_keys(paper_keys)
+        selected_source = _clean_source(source)
+        selected_tags = _clean_tags(tags)
+        filtered = self._filter_by_source(articles, selected_source)
+        filtered = self._filter_by_tags(filtered, selected_tags, tag_match)
+        return {
+            "items": [normalize_article(item) for item in filtered[offset : offset + limit]],
+            "total": len(filtered),
+        }
+
+    def count_articles(
+        self,
+        *,
+        source: str = "all",
+        date: str | None = None,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+    ) -> int:
+        self._require_sqlite()
+        selected_source = _clean_source(source)
+        selected_tags = _clean_tags(tags)
+        where = []
+        params: list[Any] = []
+        if selected_source != "all":
+            where.append("source = ?")
+            params.append(selected_source)
+        if date:
+            where.append("published_date = ?")
+            params.append(date)
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+        with sqlite3.connect(f"file:{self.sqlite_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            if not selected_tags:
+                row = conn.execute(f"SELECT COUNT(*) FROM papers {where_sql}", params).fetchone()
+                return int(row[0])
+
+            rows = conn.execute(
+                f"""
+                SELECT categories, category, primary_category, classification
+                FROM papers
+                {where_sql}
+                """,
+                params,
+            ).fetchall()
+
+        count = 0
+        for row in rows:
+            row_tags = []
+            for value in (
+                row["categories"],
+                row["category"],
+                row["primary_category"],
+                row["classification"],
+            ):
+                row_tags.extend(_as_list(value))
+            if self._filter_by_tags([{"tags": row_tags}], selected_tags, tag_match):
+                count += 1
+        return count
+
     def search(
         self,
         *,
@@ -314,10 +428,50 @@ class ArticleSearchEngine:
         tag_match: TagMatchMode = "or",
         scope_semantic_query: str = "",
         scope_limit: int = 1000,
+        scope_paper_keys: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        return self.search_page(
+            mode=mode,
+            semantic_query=semantic_query,
+            keyword_query=keyword_query,
+            source=source,
+            limit=limit,
+            offset=offset,
+            pool_size=pool_size,
+            min_score=min_score,
+            rrf_k=rrf_k,
+            keyword_reserved=keyword_reserved,
+            tags=tags,
+            tag_match=tag_match,
+            scope_semantic_query=scope_semantic_query,
+            scope_limit=scope_limit,
+            scope_paper_keys=scope_paper_keys,
+            exact_total=False,
+        )["items"]
+
+    def search_page(
+        self,
+        *,
+        mode: SearchMode,
+        semantic_query: str = "",
+        keyword_query: str = "",
+        source: str = "all",
+        limit: int = 20,
+        offset: int = 0,
+        pool_size: int = 100,
+        min_score: float | None = None,
+        rrf_k: int = 60,
+        keyword_reserved: int = 3,
+        tags: list[str] | None = None,
+        tag_match: TagMatchMode = "or",
+        scope_semantic_query: str = "",
+        scope_limit: int = 1000,
+        scope_paper_keys: list[str] | None = None,
+        exact_total: bool = True,
+    ) -> dict[str, Any]:
         selected_tags = _clean_tags(tags)
         if mode == "none":
-            return self.articles(source=source, limit=limit, offset=offset, tags=selected_tags, tag_match=tag_match)
+            return self.article_page(source=source, limit=limit, offset=offset, tags=selected_tags, tag_match=tag_match)
         if limit <= 0:
             raise ValueError("limit must be greater than 0.")
         if offset < 0:
@@ -328,8 +482,12 @@ class ArticleSearchEngine:
         index, metadata, manifest = self._ensure_artifacts_loaded()
         selected_source = _clean_source(source)
         final_count = offset + limit
-        candidate_count = min(max(pool_size, final_count, scope_limit if scope_semantic_query.strip() else 0), len(metadata))
-        scope_keys = self._scope_paper_keys(
+        candidate_count = len(metadata) if exact_total else min(
+            max(pool_size, final_count, scope_limit if scope_semantic_query.strip() else 0),
+            len(metadata),
+        )
+        scope_keys = self._combined_scope_paper_keys(
+            scope_paper_keys,
             scope_semantic_query,
             index,
             metadata,
@@ -342,14 +500,22 @@ class ArticleSearchEngine:
             query = semantic_query.strip() or keyword_query.strip()
             query_embedding = self._encode_query(query, manifest)
             results = search_semantic_pool(index, metadata, query_embedding, candidate_count, min_score)
-            return self._filter_and_slice(results, selected_source, offset, limit, selected_tags, tag_match, scope_keys)
+            filtered = self._filter_results(results, selected_source, selected_tags, tag_match, scope_keys)
+            return {
+                "items": [normalize_article(item) for item in filtered[offset : offset + limit]],
+                "total": len(filtered),
+            }
 
         if mode == "keyword":
             query = keyword_query.strip() or semantic_query.strip()
             if not query:
                 raise ValueError("Keyword query cannot be empty.")
             results = search_keyword_pool(str(self.sqlite_path), metadata, query, candidate_count)
-            return self._filter_and_slice(results, selected_source, offset, limit, selected_tags, tag_match, scope_keys)
+            filtered = self._filter_results(results, selected_source, selected_tags, tag_match, scope_keys)
+            return {
+                "items": [normalize_article(item) for item in filtered[offset : offset + limit]],
+                "total": len(filtered),
+            }
 
         if mode == "hybrid":
             semantic_text = semantic_query.strip() or keyword_query.strip()
@@ -372,24 +538,61 @@ class ArticleSearchEngine:
                 min_score,
             )
             fused = reciprocal_rank_fusion(keyword_results, semantic_results, rrf_k)
-            filtered = self._filter_by_source(fused, selected_source)
-            filtered = self._filter_by_scope(filtered, scope_keys)
-            filtered = self._filter_by_tags(filtered, selected_tags, tag_match)
+            filtered = self._filter_results(fused, selected_source, selected_tags, tag_match, scope_keys)
             selection_limit = min(final_count, len(filtered))
             if selection_limit <= 0:
-                return []
+                return {"items": [], "total": len(filtered)}
             selected, _reserved_count = select_hybrid_top_k(
                 filtered,
                 selection_limit,
                 min(keyword_reserved, selection_limit),
             )
-            return [normalize_article(item) for item in selected[offset : offset + limit]]
+            return {
+                "items": [normalize_article(item) for item in selected[offset : offset + limit]],
+                "total": len(filtered),
+            }
 
         raise ValueError(f"Unsupported search mode: {mode}")
 
     def _require_sqlite(self) -> None:
         if not self.sqlite_path.exists():
             raise ArtifactNotReadyError(f"Missing SQLite artifact: {self.sqlite_path}")
+
+    def _articles_for_keys(self, paper_keys: list[str]) -> list[dict[str, Any]]:
+        self._require_sqlite()
+        ordered_keys = list(dict.fromkeys(key.strip() for key in paper_keys if key.strip()))
+        if not ordered_keys:
+            return []
+
+        placeholders = ", ".join(["?"] * len(ordered_keys))
+        with sqlite3.connect(f"file:{self.sqlite_path}?mode=ro", uri=True) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""
+                SELECT
+                    paper_key,
+                    source,
+                    external_id,
+                    title,
+                    abstract,
+                    authors,
+                    published_date,
+                    doi,
+                    journal,
+                    categories,
+                    url,
+                    pdf_url,
+                    category,
+                    primary_category,
+                    classification
+                FROM papers
+                WHERE paper_key IN ({placeholders})
+                """,
+                ordered_keys,
+            ).fetchall()
+
+        by_key = {str(row["paper_key"]): dict(row) for row in rows}
+        return [by_key[key] for key in ordered_keys if key in by_key]
 
     @staticmethod
     def _filter_by_source(results: list[dict[str, Any]], source: str) -> list[dict[str, Any]]:
@@ -430,8 +633,9 @@ class ArticleSearchEngine:
                 filtered.append(item)
         return filtered
 
-    def _scope_paper_keys(
+    def _combined_scope_paper_keys(
         self,
+        scope_paper_keys: list[str] | None,
         scope_semantic_query: str,
         index: Any,
         metadata: list[dict[str, Any]],
@@ -439,9 +643,14 @@ class ArticleSearchEngine:
         scope_limit: int,
         min_score: float | None,
     ) -> set[str] | None:
+        explicit_scope = {
+            key.strip()
+            for key in (scope_paper_keys or [])
+            if key.strip()
+        }
         query = scope_semantic_query.strip()
         if not query:
-            return None
+            return explicit_scope or None
         query_embedding = self._encode_query(query, manifest)
         scoped = search_semantic_pool(
             index,
@@ -450,11 +659,14 @@ class ArticleSearchEngine:
             min(max(scope_limit, 1), len(metadata)),
             min_score,
         )
-        return {
+        semantic_scope = {
             str(item.get("paper_key") or item.get("id") or "").strip()
             for item in scoped
             if str(item.get("paper_key") or item.get("id") or "").strip()
         }
+        if explicit_scope:
+            return explicit_scope & semantic_scope
+        return semantic_scope
 
     def _filter_and_slice(
         self,
@@ -466,7 +678,17 @@ class ArticleSearchEngine:
         tag_match: TagMatchMode = "or",
         scope_keys: set[str] | None = None,
     ) -> list[dict[str, Any]]:
+        filtered = self._filter_results(results, source, tags or [], tag_match, scope_keys)
+        return [normalize_article(item) for item in filtered[offset : offset + limit]]
+
+    def _filter_results(
+        self,
+        results: list[dict[str, Any]],
+        source: str,
+        tags: list[str],
+        tag_match: TagMatchMode,
+        scope_keys: set[str] | None,
+    ) -> list[dict[str, Any]]:
         filtered = self._filter_by_source(results, source)
         filtered = self._filter_by_scope(filtered, scope_keys)
-        filtered = self._filter_by_tags(filtered, tags or [], tag_match)
-        return [normalize_article(item) for item in filtered[offset : offset + limit]]
+        return self._filter_by_tags(filtered, tags, tag_match)

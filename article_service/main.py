@@ -93,7 +93,9 @@ def articles(
     source: str = "all",
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    include_total: bool = False,
     date: str | None = None,
+    paper_keys: str = "",
     tags: str = "",
     tag_match: TagMatchMode = "or",
     semantic_query: str = "",
@@ -105,11 +107,39 @@ def articles(
     min_score: float | None = None,
     rrf_k: int = Query(default=60, ge=1),
     keyword_reserved: int = Query(default=3, ge=0),
-) -> list[dict]:
+) -> list[dict] | dict:
     mode = resolve_mode(search_mode, semantic_query, keyword_query)
     selected_tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    selected_paper_keys = [key.strip() for key in paper_keys.split(",") if key.strip()]
     try:
+        if selected_paper_keys and mode == "none":
+            if include_total:
+                return engine.article_page_by_keys(
+                    paper_keys=selected_paper_keys,
+                    source=source,
+                    limit=limit,
+                    offset=offset,
+                    tags=selected_tags,
+                    tag_match=tag_match,
+                )
+            return engine.articles_by_keys(
+                paper_keys=selected_paper_keys,
+                source=source,
+                limit=limit,
+                offset=offset,
+                tags=selected_tags,
+                tag_match=tag_match,
+            )
         if mode == "none":
+            if include_total:
+                return engine.article_page(
+                    source=source,
+                    limit=limit,
+                    offset=offset,
+                    date=date,
+                    tags=selected_tags,
+                    tag_match=tag_match,
+                )
             return engine.articles(
                 source=source,
                 limit=limit,
@@ -117,6 +147,24 @@ def articles(
                 date=date,
                 tags=selected_tags,
                 tag_match=tag_match,
+            )
+        if include_total:
+            return engine.search_page(
+                mode=mode,
+                semantic_query=semantic_query,
+                keyword_query=keyword_query,
+                source=source,
+                limit=limit,
+                offset=offset,
+                pool_size=pool_size,
+                tags=selected_tags,
+                tag_match=tag_match,
+                scope_paper_keys=selected_paper_keys,
+                scope_semantic_query=scope_semantic_query,
+                scope_limit=scope_limit,
+                min_score=min_score,
+                rrf_k=rrf_k,
+                keyword_reserved=keyword_reserved,
             )
         return engine.search(
             mode=mode,
@@ -128,6 +176,7 @@ def articles(
             pool_size=pool_size,
             tags=selected_tags,
             tag_match=tag_match,
+            scope_paper_keys=selected_paper_keys,
             scope_semantic_query=scope_semantic_query,
             scope_limit=scope_limit,
             min_score=min_score,
