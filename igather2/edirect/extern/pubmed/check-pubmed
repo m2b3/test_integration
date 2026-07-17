@@ -1,0 +1,37 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# check-pubmed
+
+if [ -d "${sourceBase}" ]
+then
+  cd "${sourceBase}"
+
+  current=$(
+    ls *.xml.gz 2>/dev/null |
+    cut -c 7-8 | sort -n | tail -n 1
+  )
+
+  latest=$(
+    nquire -lst ftp://ftp.ncbi.nlm.nih.gov/pubmed/baseline |
+    grep ".xml.gz" | grep -v ".md5" |
+    cut -c 7-8 | sort -n | tail -n 1
+  )
+
+  if [ -n "$current" ] && [ -n "$latest" ]
+  then
+    if [ "$current" != "$latest" ]
+    then
+      DisplayError "Need to update PubMed release files from 20${current} to 20${latest} by first running archive-pubmed -zap"
+      result="1"
+    else
+      echo "PubMed files for 20${current} are using current release" >&2
+    fi
+  elif [ -z "$current" ]
+  then
+    DisplayWarning "Missing current files"
+  elif [ -z "$latest" ]
+  then
+    DisplayWarning "Missing latest files"
+  fi
+fi

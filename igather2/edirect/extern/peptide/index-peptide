@@ -1,0 +1,24 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-peptide
+
+# variable contains peptide-database-specific xtract indexing instructions
+read -r -d '' idxtxt <<- EOS
+xtract -set IdxDocumentSet -rec IdxDocument \
+  -pattern PeptInfo -UID PeptInfo/UID -PAD -pad "&UID" \
+    -wrp IdxUid -element "&UID" -clr -rst -tab "" \
+    -group PeptInfo -pkg IdxSearchFields \
+      -block PeptInfo -VAL "&PAD[3:]" \
+        -rst -pfx "UID-" -TAG "&PAD[:2]" \
+        -rst -wrp "&TAG" -element "&VAL" \
+      -block Accession -VAL "Accession[_|]" \
+        -rst -pfx "ACCN-" -TAG "Accession[|_]" \
+        -rst -wrp "&TAG" -element "&VAL" \
+      -block Product -wrp PROD -indexer Product \
+      -block Organism -wrp ORGN -element Organism \
+        -rst -wrp DIV -element @div \
+      -block Sequence -wrp PENT -pentamers Sequence
+EOS
+
+IncrementalIndex "${idxtxt}"

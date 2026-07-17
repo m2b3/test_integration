@@ -1,0 +1,226 @@
+#!/bin/bash
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+line=0
+row=0
+
+PrintProgress() {
+
+  chr="$1"
+
+  # star indicates perfect match, plus sign possible match, dot no match
+  printf "${chr}" >&2
+  row=$(( row + 1 ))
+  if [ "$row" -ge 50 ]
+  then
+    printf "\n" >&2
+    row=0
+  fi
+}
+
+WriteTitles() {
+
+  rs="$1"
+  ttl="$2"
+
+  snd=$( echo "$ttl" | word-at-a-time | filter-stop-words | sort -f | uniq -i )
+  if [ -z "$snd" ]
+  then
+    PrintProgress "-"
+    continue
+  fi
+
+  pmid="?"
+  # use esearch to eliminate match
+  sch=$( esearch -db pubmed -query "$ttl" < /dev/null )
+  num=$( echo "$sch" | xtract -pattern ENTREZ_DIRECT -element Count )
+  if [ -n "$num" ] && [ "$num" = "1" ]
+  then
+    pmid=$( echo "$sch" | efetch -format uid )
+  fi
+
+  echo "$rs" |
+  cut -f 2 |
+  word-at-a-time |
+  while IFS=$'\t' read uid
+  do
+    xml=$( echo "$uid" | xfetch -db pubmed )
+    if [ -z "$xml" ]
+    then
+      PrintProgress "-"
+      continue
+    fi
+    hasTitle=$( echo "$xml" | grep '<ArticleTitle>' )
+    if [ -z "$hasTitle" ]
+    then
+      PrintProgress "-"
+      continue
+    fi
+    newTitle=$( echo "$xml" | xtract -pattern PubmedArticle -element ArticleTitle )
+
+    # calculate Jaccard score - intersection divided by union
+    fst=$( echo "$newTitle" | word-at-a-time | filter-stop-words | sort -f | uniq -i )
+    if [ -z "$fst" ]
+    then
+      PrintProgress "-"
+      continue
+    fi
+    intrs=$( comm -12 <( echo "$fst" ) <( echo "$snd" ) | wc -l | tr -d ' ' )
+    union=$( comm <( echo "$fst" ) <( echo "$snd" ) | wc -l | tr -d ' ' )
+    if [ -z "$union" ] || [ "$union" = "0" ]
+    then
+      PrintProgress "-"
+      continue
+    fi
+    score=$(( intrs * 100 / union ))
+
+    # if [ "$intrs" = "$union" ]
+    # then
+      # PrintProgress "*"
+      # skip probable perfect match - right now looking for cutoff score
+      # continue
+    # fi
+
+    echo "$xml" |
+    xtract -pattern PubmedArticle -if ArticleTitle \
+      -lbl "(${score} - ${pmid})" -element MedlineCitation/PMID -year "PubDate/*" \
+      -block Author -sep " " -tab ", " -element LastName,Initials \
+      -block Article -deq "\n" -element ArticleTitle
+
+    # PrintProgress "+"
+    PrintProgress "*"
+  done
+}
+
+FilterByScore() {
+
+  scr="$1"
+  rs="$2"
+
+  # prepare awk command given top score
+  scr=$(( scr - 2 ))
+  com="$"
+  cmd=$( echo "${com}1 > ${scr}" )
+
+  # keep records with top score or one below
+  echo "$rs" |
+  awk -F '\t' -v 'OFS=\t' "( $cmd ) {print}" |
+  head -n 10 | cut -f 2
+}
+
+FilterCandidates() {
+
+  # input is sorted and ranked PMIDs
+  rs="$1"
+
+  if [ -z "$rs" ]
+  then
+    return
+  fi
+
+  # get top score from first line
+  scr=$( echo "$rs" | head -n 1 | cut -f 1 )
+
+  # require minimum of 4 matching words/pairs
+  if [ "$scr" -lt 4 ]
+  then
+    return
+  fi
+
+  # keep best matching PMIDs
+  lm=$( FilterByScore "$scr" "$rs" )
+  if [ -z "$lm" ]
+  then
+    return
+  fi
+
+  echo "$lm"
+}
+
+while IFS=$'\t' read div accn ref year faut laut anum tlen tnum titl
+do
+  line=$(( line + 1 ))
+
+  # use AUTH field instead of FAUT to catch more true positives
+  anm=$( xinfo -count "$faut [AUTH]" | cut -f 1 )
+  if [ "$anm" = "0" ]
+  then
+    # bail if first author is not in index, since -filter will ignore empty result
+    PrintProgress "."
+    continue
+  fi
+
+  # initial filtering by adjacent overlapping word pairs
+  res=$( xsearch -pairs "$titl" | head -n 25 )
+  lim=$( FilterCandidates "$res" )
+  if [ -z "$lim" ]
+  then
+    # probably short titles, below minimum required matches
+    PrintProgress "."
+    continue
+  fi
+
+  # restrict results by first author name
+  res=$(
+    echo "$lim" | sort -n |
+    xfilter -query "$faut [AUTH]" |
+    head -n 10
+  )
+  if [ -z "$res" ]
+  then
+    PrintProgress "."
+    continue
+  fi
+  lim="$res"
+
+  # range from 5 characters below to 10 characters above title length
+  fr=$(( tlen - 5 ))
+  to=$(( tlen + 10 ))
+  res=$(
+    echo "$lim" | sort -n |
+    xfilter -query "${fr}:${to} [TLEN]" |
+    head -n 10
+  )
+  if [ -z "$res" ]
+  then
+    fr=$(( tnum - 3 ))
+    to=$(( tnum + 6 ))
+    res=$(
+      echo "$lim" | sort -n |
+      xfilter -query "${fr}:${to} [TNUM]" |
+      head -n 10
+    )
+    if [ -z "$res" ]
+    then
+      PrintProgress "."
+      continue
+    fi
+  fi
+  lim="$res"
+
+  # print return if any dots on line
+  if [ "$row" -gt 0 ]
+  then
+    printf "\n" >&2
+    row=0
+  fi
+
+  # number of candidate matches
+  hits=$( echo "$res" | wc -l | tr -d ' ' )
+  if [ "$hits" = "0" ]
+  then
+    PrintProgress "."
+    continue
+  fi
+
+  # print results
+  echo ""
+  echo "Line ${line}, Div ${div}, Hits ${hits}:"
+  echo "$accn, $ref, $year, $faut, $laut"
+  echo "$titl"
+  echo ""
+  WriteTitles "$res" "$titl"
+  echo ""
+done

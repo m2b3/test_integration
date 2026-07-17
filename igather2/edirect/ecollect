@@ -1,0 +1,542 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  ecollect
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   10/31/2024
+#
+# ==========================================================================
+
+# echo "ecollect $@" >&2
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/ecommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/ecommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/ecommon.sh
+
+# INITIALIZE SPECIFIC FLAGS
+
+api_key=""
+base="https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+dbase=""
+web_env=""
+qry_key=""
+qury=""
+ids=""
+rest=""
+input=""
+num=""
+solrcount=false
+solrsubset=false
+retmax=9999
+tranquil=false
+debug=false
+
+quick=false
+
+# read API Key from environment variable
+
+if [ -n "${NCBI_API_KEY}" ]
+then
+  api_key="${NCBI_API_KEY}"
+fi
+
+# READ COMMAND-LINE ARGUMENTS
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+
+    # server location
+    -base )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      base="$1"
+      shift
+      ;;
+    -internal )
+      base="https://eutils-internal.ncbi.nlm.nih.gov/entrez/eutils/"
+      shift
+      ;;
+    -dev )
+      base="https://dev.ncbi.nlm.nih.gov/entrez/eutils/"
+      shift
+      ;;
+
+    # special commands for SOLR workaround
+    -count )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      qury="$1"
+      solrcount=true
+      shift
+      ;;
+    -subset )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      qury="$1"
+      solrsubset=true
+      shift
+      ;;
+    -retmax )
+      # used by SOLR arguments
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      retmax="$1"
+      shift
+      ;;
+
+    # source database
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+
+    # arguments for various data sources
+    -web )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      web_env="$1"
+      shift
+      ;;
+    -key )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      qry_key="$1"
+      shift
+      ;;
+    -query )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      qury="$1"
+      shift
+      ;;
+    -id )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      ids="$1"
+      shift
+      while [ $# -gt 0 ]
+      do
+        case "$1" in
+          -* )
+            break
+            ;;
+          "" )
+            # skip empty argument from internal call
+            shift
+            break
+            ;;
+          * )
+            # concatenate run of UIDs with commas
+            ids="$ids,$1"
+            shift
+            ;;
+        esac
+      done
+      ;;
+    -rest )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      rest="$1"
+      shift
+      ;;
+    -input )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      input="$1"
+      shift
+      ;;
+
+    # date restriction
+    -days | -reldate )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      reldate="$1"
+      shift
+      ;;
+    -mindate )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      mindate="$1"
+      shift
+      ;;
+    -maxdate )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      maxdate="$1"
+      shift
+      ;;
+    -datetype )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      datetype="$1"
+      shift
+      ;;
+
+    # number of records if known
+    -num )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      num="$1"
+      shift
+      ;;
+
+    # -tranquil flag conditionally ignores "No items found" message and automatic retries
+    -tranquil )
+      shift
+      tranquil=true
+      ;;
+
+    # verbose debugging
+    -debug )
+      shift
+      debug=true
+      ;;
+
+    # do not call ParseCommonArgs from ecollect
+
+    # unrecognized argument
+    * )
+      DisplayError "Unrecognized argument $1"
+      shift
+      ;;
+  esac
+done
+
+# EXECUTE NETWORK REQUEST WITH AUTOMATIC RETRY
+
+RunWithCollectArgs() {
+
+  AddIfNotEmpty -reldate "$reldate" \
+  AddIfNotEmpty -mindate "$mindate" \
+  AddIfNotEmpty -maxdate "$maxdate" \
+  AddIfNotEmpty -datetype "$datetype" \
+  AddIfNotEmpty -api_key "$api_key" \
+  RunWithLogging "$@"
+}
+
+# INTERNAL UTILITY FUNCTIONS TO WORK AROUND PUBMED/PMC SOLR SERVER LIMITATIONS
+
+GetSOLRCount() {
+
+  if [ -n "$qury" ] && ( [ "$dbase" = "pubmed" ] || [ "$dbase" = "pmc" ] )
+  then
+    # count is accurate even for PubMed/PMC SOLR server
+    res=$( RunWithCollectArgs nquire -url "$base" esearch.fcgi -retmax 0 -db "$dbase" -term "$qury" )
+    if [ -n "$res" ]
+    then
+      echo "$res" | sed -e 's|<TranslationStack>.*</TranslationStack>||' |
+      xtract -pattern eSearchResult -element Count
+    fi
+  else
+    DisplayError "Missing argument describing data source"
+    exit 1
+  fi
+}
+
+GetSOLRSubset() {
+
+  if [ -n "$qury" ] && ( [ "$dbase" = "pubmed" ] || [ "$dbase" = "pmc" ] )
+  then
+    # count is accurate even for PubMed/PMC SOLR server
+    res=$( RunWithCollectArgs nquire -url "$base" esearch.fcgi -retmax "$retmax" -db "$dbase" -term "$qury" )
+    if [ -n "$res" ]
+    then
+      echo "$res" |
+      sed -e 's|<QueryTranslation>.*</QueryTranslation>||' |
+      sed -e 's|<TranslationSet>.*</TranslationSet>||' |
+      sed -e 's|<TranslationStack>.*</TranslationStack>||' |
+      grep '.' | sed -e "s|$(printf '\t')|  |"
+    fi
+  else
+    DisplayError "Missing argument describing data source"
+    exit 1
+  fi
+}
+
+# PUBMED/PMC SOLR SERVER WORKAROUND
+
+SearchSOLR() {
+
+  # break PubMed/PMC SOLR server requests into chunks of no more than 9999 UIDs
+
+  local fr
+  local to
+  local md
+  local nx
+
+  qy="$1"
+  fr="$2"
+  to="$3"
+
+  # The fr:to [UID] range query does not work on older server
+  # -tranquil flag specifically suppresses "No items found" message and automatic retries
+  count=$( ecollect -base "$base" -db "$dbase" -count "( ${qy} AND ${fr}:${to} [UID])" \
+             -reldate "$reldate" -mindate "$mindate" -maxdate "$maxdate" -datetype "$datetype" \
+             -tranquil < /dev/null )
+  if [ -n "$count" ]
+  then
+    if [ "$count" -eq 0 ]
+    then
+      if [ "$verbose" = true ]
+      then
+        printf "  %08d : %08d [UID] . %d\n" "$fr" "$to" "$count" >&2
+      fi
+    elif [ "$count" -le 9999 ]
+    then
+      if [ "$verbose" = true ]
+      then
+        printf "  %08d : %08d [UID] * %d\n" "$fr" "$to" "$count" >&2
+      fi
+      ecollect -base "$base" -db "$dbase" -subset "( ${qy} AND ${fr}:${to} [UID])" \
+        -reldate "$reldate" -mindate "$mindate" -maxdate "$maxdate" -datetype "$datetype" \
+        -tranquil < /dev/null |
+      xtract -pattern eSearchResult -block IdList -sep "\n" -element Id |
+      sort -n | uniq
+    else
+      if [ "$verbose" = true ]
+      then
+        printf "  %08d : %08d [UID] - %d\n" "$fr" "$to" "$count" >&2
+      fi
+      # partition half way between the points
+      md=$(( fr / 2 + to / 2 ))
+      nx=$(( md + 1 ))
+      SearchSOLR "$qy" "$fr" "$md"
+      SearchSOLR "$qy" "$nx" "$to"
+    fi
+  else
+    if [ "$verbose" = true ]
+    then
+      printf "  %08d : %08d [UID] ~ 0\n" "$fr" "$to" >&2
+    fi
+  fi
+}
+
+GenerateFromSOLR() {
+
+  if [ -z "$num" ]
+  then
+    num=$( ecollect -base "$base" -db "$dbase" -count "$qury" \
+             -reldate "$reldate" -mindate "$mindate" -maxdate "$maxdate" -datetype "$datetype" \
+             -tranquil < /dev/null )
+  fi
+
+  total="$num"
+
+  if [ "$total" -lt 1 ]
+  then
+    exit 0
+  fi
+
+  minUID=1
+  maxUID=0
+
+  if [ "$dbase" = "pubmed" ]
+  then
+    # remove pubmed books inserted at front of list, but still retrieve 1000 PMIDs and take maximum
+    maxUID=$(
+      ecollect -base "$base" -db "$dbase" -subset "all [SB] NOT pubmed books [SB]" -retmax 1000 \
+        -reldate "$reldate" -mindate "$mindate" -maxdate "$maxdate" -datetype "$datetype" \
+        -tranquil < /dev/null |
+      xtract -pattern eSearchResult -max Id
+    )
+  elif [ "$dbase" = "pmc" ]
+  then
+    maxUID=$(
+      ecollect -base "$base" -db "$dbase" -subset "all [SB]" -retmax 1000 \
+        -reldate "$reldate" -mindate "$mindate" -maxdate "$maxdate" -datetype "$datetype" \
+        -tranquil < /dev/null |
+      xtract -pattern eSearchResult -max Id
+    )
+  fi
+
+  # reality check for successful creation of maxUID variable
+  if [ -z "$maxUID" ]
+  then
+    if [ "$dbase" = "pubmed" ]
+    then
+      echo "Unable to get top PMID" >&2
+    elif [ "$dbase" = "pmc" ]
+    then
+      echo "Unable to get top PMCID" >&2
+    fi
+    exit 0
+  fi
+
+  # occasional older records, newly found and submitted by publishers,
+  # will be lower in the sort order (EDAT is set to its PDAT value), so
+  # increment by 1000 to accommodate this rare situation
+  maxUID=$(( maxUID + 1000 ))
+
+  uids=$( SearchSOLR "$qury" "$minUID" "$maxUID" | sort -n | uniq )
+
+  if [ -n "$uids" ]
+  then
+    cumulative=$( echo "$uids" | wc -l | tr -d ' ' )
+    if [ "$verbose" = true ]
+    then
+      echo "cumulative: ${cumulative},  total: ${total}" >&2
+    fi
+  fi
+
+  echo "$uids"
+}
+
+# return UID list from specified source or Entrez history server
+
+GenerateUidList() {
+
+  # normalize database to lower-case (e.g., SRA -> sra) and remove whitespace
+  dbase=$( echo "$dbase" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' )
+
+  # check for empty database argument
+  if [ -z "$dbase" ]
+  then
+    DisplayError "Missing -db argument"
+    exit 1
+  fi
+
+  # first check for UIDs stored in Entrez history server
+
+  if [ -n "$web_env" ] && [ -n "$qry_key" ]
+  then
+    # obtain raw UIDs from history server
+    chunk=25000
+    mxx=0
+    if [ "$dbase" = "pubmed" ] || [ "$dbase" = "pmc" ]
+    then
+      chunk=10000
+      if [ "$quick" = false ]
+      then
+        mxx=9999
+      fi
+    fi
+    GenerateHistoryChunks "$chunk" 0 "$mxx" |
+    while read fr chnk
+    do
+      RunWithCollectArgs nquire -url "$base" efetch.fcgi \
+        -query_key "$qry_key" -WebEnv "$web_env" -retstart "$fr" -retmax "$chnk" \
+        -db "$dbase" -rettype uilist -retmode text
+    done
+
+  else
+
+    # otherwise EDirect supports several possible sources for input of raw UIDs
+
+    if [ -n "$qury" ]
+    then
+      # workaround for PubMed/PMC SOLR server limit of 10K UIDs per query
+      slr=$( GenerateFromSOLR )
+      if [ -n "$slr" ]
+      then
+        nm=$( echo "$slr" | wc -l  | tr -d ' ' )
+        if [ -n "$nm" ] && [ -n "$num" ] && [ "$nm" -ne "$num" ]
+        then
+          DisplayWarning "Actual PMID count ${nm} does not match expected total ${num}"
+        fi
+      fi
+      echo "$slr"
+
+    elif [ -n "$ids" ]
+    then
+      # LookupSpecialAccessions instantiates converted accessions into $ids variable,
+      # so -id argument, if populated, must be used before $rest and $input
+      echo "$ids"
+
+    elif [ -n "$rest" ]
+    then
+      # raw UIDs or instantiated UIDs extracted from ENTREZ_DIRECT message
+      echo "$rest"
+
+    elif [ -n "$input" ]
+    then
+      # input file of raw UIDs
+      cat "$input"
+
+    else
+      DisplayError "Missing argument describing data source"
+      exit 1
+
+    fi |
+    # faster version of accn-at-a-time without case transformation
+    tr -cs a-zA-Z0-9_. '\n'
+
+  fi |
+
+  # sort and unique final UID results
+  sort -n | uniq
+}
+
+# SPECIALIZED QUERY VARIANTS FOR PUBMED/PMC SOLR WORKAROUND
+
+if [ "$solrcount" = true ]
+then
+  GetSOLRCount
+  exit 0
+fi
+
+if [ "$solrsubset" = true ]
+then
+  GetSOLRSubset
+  exit 0
+fi
+
+# NORMAL QUERY
+
+GenerateUidList
+
+exit 0

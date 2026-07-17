@@ -1,0 +1,252 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# download-pmc
+
+DownloadFTPorASP() {
+
+  fl="$1"
+  url="$2"
+
+  if [ "$noAspera" = true ]
+  then
+    echo "$fl" | nquire -dwn "${url}"
+  else
+    echo "$fl" | nquire -asp "${url}"
+  fi
+}
+
+DownloadOneByFTP() {
+
+  dir="$1"
+  fl="$2"
+
+  url="ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/${dir}/xml"
+
+  DownloadFTPorASP "$fl" "${url}"
+
+  # delete if file is present but empty
+  if [ -f "$fl" ] && [ ! -s "$fl" ]
+  then
+    rm -f "$fl"
+  fi
+
+  # retry if no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "First Failed Download Retry" >&2
+    DownloadFTPorASP "$fl" "${url}"
+  fi
+
+  # retry again if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 20
+    echo "Second Failed Download Retry" >&2
+    DownloadFTPorASP "$fl" "${url}"
+  fi
+
+  # retry once more if still no file, using -dwn instead of -asp
+  if [ ! -f "$fl" ]
+  then
+    sleep 30
+    echo "Third Failed Download Retry" >&2
+    echo "$fl" | nquire -dwn "${url}"
+  fi
+
+  # verify contents
+  if [ -s "$fl" ]
+  then
+    errs=$( (tar -xOzf "$fl" --to-stdout | xtract -mixed -verify -max 180) 2>&1 )
+    if [ -n "$errs" ]
+    then
+      # delete and retry one more time
+      rm -f "$fl"
+      sleep 10
+      echo "Invalid Contents Retry" >&2
+      DownloadFTPorASP "$fl" "${url}"
+      if [ -s "$fl" ]
+      then
+        errs=$( (tar -xOzf "$fl" --to-stdout | xtract -mixed -verify -max 180) 2>&1 )
+        if [ -n "$errs" ]
+        then
+          if [ ! -d "bad" ]
+          then
+            mkdir "bad"
+          fi
+          # rm -f "$fl"
+          mv -f "$fl" "bad"
+          frst=$( echo "$errs" | head -n 1 )
+          echo "ERROR invalid file '$fl' moved to /bad, errors start with '$frst'" >&2
+        fi
+      else
+        echo "Download Attempts Failed" >&2
+      fi
+    fi
+  else
+    rm -f "$fl"
+    echo "Download of '$fl' Failed" >&2
+  fi
+}
+
+DownloadOneByHTTPS() {
+
+  dir="$1"
+  fl="$2"
+
+  url="https://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/${dir}/xml"
+
+  nquire -bulk -get "${url}" "$fl" > "$fl"
+
+  # delete if file is present but empty
+  if [ -f "$fl" ] && [ ! -s "$fl" ]
+  then
+    rm -f "$fl"
+  fi
+
+  # retry if no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 10
+    echo "First Failed Download Retry" >&2
+    nquire -bulk -get "${url}" "$fl" > "$fl"
+  fi
+
+  # retry again if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 20
+    echo "Second Failed Download Retry" >&2
+    nquire -bulk -get "${url}" "$fl" > "$fl"
+  fi
+
+  # retry once more if still no file
+  if [ ! -f "$fl" ]
+  then
+    sleep 30
+    echo "Third Failed Download Retry" >&2
+    nquire -bulk -get "${url}" "$fl" > "$fl"
+  fi
+
+  # verify contents
+  if [ -s "$fl" ]
+  then
+    errs=$( (tar -xOzf "$fl" --to-stdout | xtract -mixed -verify -max 180) 2>&1 )
+    if [ -n "$errs" ]
+    then
+      # delete and retry one more time
+      rm -f "$fl"
+      sleep 10
+      echo "Invalid Contents Retry" >&2
+      nquire -bulk -get "${url}" "$fl" > "$fl"
+      if [ -s "$fl" ]
+      then
+        errs=$( (tar -xOzf "$fl" --to-stdout | xtract -mixed -verify -max 180) 2>&1 )
+        if [ -n "$errs" ]
+        then
+          if [ ! -d "bad" ]
+          then
+            mkdir "bad"
+          fi
+          # rm -f "$fl"
+          mv -f "$fl" "bad"
+          frst=$( echo "$errs" | head -n 1 )
+          echo "ERROR invalid file '$fl' moved to /bad, errors start with '$frst'" >&2
+        fi
+      fi
+    fi
+  else
+    rm -f "$fl"
+    echo "Download of '$fl' Failed" >&2
+  fi
+}
+
+DownloadSection() {
+
+  dir="$1"
+  flt="$2"
+
+  if [ "$useFtp" = true ]
+  then
+    nquire -lst "ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/${dir}/xml" |
+    grep ".tar.gz" | grep -v ".tar.gz.tmp" | grep "$flt" |
+    skip-if-file-exists |
+    while read fl
+    do
+      sleep 1
+      echo "$fl" >&2
+      DownloadOneByFTP "$dir" "$fl"
+    done
+  elif [ "$useHttps" = true ]
+  then
+    nquire -get "https://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/${dir}/xml" |
+    xtract -pattern a -if a -starts-with "oa_" -and a -ends-with ".tar.gz" -and a -contains "$flt" -element a |
+    skip-if-file-exists |
+    while read fl
+    do
+      sleep 1
+      echo "$fl" >&2
+      DownloadOneByHTTPS "$dir" "$fl"
+    done
+  fi
+}
+
+if [ -d "${sourceBase}" ]
+then
+  cd "${sourceBase}"
+
+  current=$(
+    ls *.tar.gz 2>/dev/null |
+    grep baseline | grep -v ".tar.gz.tmp" | cut -d '.' -f 4 | sort -f | tail -n 1
+  )
+
+  versions=$(
+    nquire -lst ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/oa_comm/xml |
+    grep baseline | grep ".tar.gz" | grep -v ".tar.gz.tmp" | 
+    cut -d '.' -f 4 | sort -f
+  )
+
+  first=$( echo "$versions" | head -n 1 )
+  last=$( echo "$versions" | tail -n 1 )
+
+  if [ -n "$first" ] && [ -n "$last" ] && [ "$first" != "$last" ]
+  then
+    mixedRelease=true
+    echo "ERROR: Exiting due to mixed releases with $first and $last" >&2
+    exit 1
+  fi
+
+  if [ -n "$current" ] && [ -n "$last" ] && [ "$current" != "$last" ]
+  then
+    echo "WARNING: Need to update PMC release files from ${current} to ${last}, moving obsolete files to /old" >&2
+    if [ ! -d "old" ]
+    then
+      mkdir "old"
+    fi
+    for fl in *.tar.gz
+    do
+      echo "$fl" | grep -v ".tar.gz.tmp" | grep -v "$current"
+    done |
+    while read fl
+    do
+      mv -f "$fl" "old"
+    done
+  fi
+
+  for flt in baseline incr
+  do
+    if [ "$flt" = "incr" ] && [ "$mixedRelease" = true ]
+    then
+      continue
+    fi
+    for dir in oa_comm oa_noncomm oa_other
+    do
+      DownloadSection "$dir" "$flt"
+      if [ $? -ne 0 ]
+      then
+        DownloadSection "$dir" "$flt"
+      fi
+    done
+  done
+fi

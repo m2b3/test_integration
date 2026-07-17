@@ -1,0 +1,140 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# datafiles-pmc
+
+DoSerials() {
+
+  year=""
+
+  files=$(
+    # obtain names of base and update files for several years
+    nquire -bulk -get https://ftp.nlm.nih.gov projects/serfilelease |
+    sed -ne 's,.* href="\([^/"]*\)".*,\1,p' | grep -v marcxml
+  )
+
+  if [ -n "$files" ]
+  then
+    year=$(
+      # get latest year embedded in file names
+      echo "$files" | grep serfilebase | sort -Vr | head -n 1 |
+      sed -e 's/serfilebase.//' -e 's/.xml//'
+    )
+    if [ -n "$year" ]
+    then
+      # limit to serfilebase and serfile updates for current year
+      files=$( echo "$files" | grep "$year" )
+    fi
+  fi
+
+  basefile="serfilebase.${year}.xml"
+  updates=$( echo "$files" | grep -v serfilebase | sort -V )
+
+  if [ ! -f "serials.txt" ] && [ ! -s "$basefile" ]
+  then
+    echo "$basefile" >&2
+    nquire -bulk -get https://ftp.nlm.nih.gov projects/serfilelease "${basefile}" > $basefile
+  fi
+
+  if [ ! -f "serials.txt" ] && [ -s "$basefile" ]
+  then
+    echo "# ${basefile}" >> serials.txt
+    cat "$basefile" |
+    xtract -pattern NLMCatalogRecord -def "-" -element NlmUniqueID PublicationInfo/Country >> serials.txt
+    cat "$basefile" |
+    xtract -pattern DeleteCatalogRecord -block NlmUniqueID -element NlmUniqueID -lbl "-" -deq "\n" >> serials.txt
+  fi
+
+  if [ -f "serials.txt" ] && [ -n "$updates" ]
+  then
+    echo "$updates" |
+    while read serfile
+    do
+      if [ ! -s "$serfile" ]
+      then
+        echo "$serfile" >&2
+        nquire -bulk -get https://ftp.nlm.nih.gov projects/serfilelease "${serfile}" > $serfile
+      fi
+      if [ -s "$serfile" ]
+      then
+        if ! grep -Fq "$serfile" serials.txt
+        then
+          echo "# ${serfile}" >> serials.txt
+          cat "$serfile" |
+          xtract -pattern NLMCatalogRecord -def "-" -element NlmUniqueID PublicationInfo/Country >> serials.txt
+          cat "$serfile" |
+          xtract -pattern DeleteCatalogRecord -block NlmUniqueID -element NlmUniqueID -lbl "-" -deq "\n" >> serials.txt
+        fi
+      fi
+    done
+  fi
+}
+
+finish_jtas() {
+
+  tr -s ' ' |
+  sed -e 's/^ *//g' -e 's/ *$//g' |
+  sort-table -k 1,1f -k 3,3n -k 4,4nr -k 2,2f |
+  uniq -i |
+  awk -F '\t' '(NR == 1  ||  $1 != prev_key) { if (NR > 1) { print prev_line }; prev_key = $1; prev_line = $0 } END { print prev_line }' |
+  cut -f 1,2
+}
+
+multi_jtas() {
+
+  tr -s ' ' |
+  sed -e 's/^ *//g' -e 's/ *$//g' |
+  sort-table -k 1,1f -k 3,3n -k 4,4nr -k 2,2f |
+  uniq -i |
+  awk -F '\t' '(NR > 1 && $1 == prev_key && $4 == prev_flag) { print } (NR == 1 || $1 != prev_key) { print; prev_key = $1; prev_flag = $4 }' |
+  cut -f 1,2 | sort | uniq |
+  awk -F '\t' '{ if (NR == 1 || $1 != prev_key) { if (NR > 1) { print saved }; prev_key = $1; saved = $1 "\t" $2 } else { saved = saved " | " $2 } } END { print saved }'
+}
+
+JourCache() {
+
+  if [ "$useFtp" = true ]
+  then
+    nquire -ftp ftp.ncbi.nlm.nih.gov pubmed jourcache.xml
+  elif [ "$useHttps" = true ]
+  then
+    nquire -bulk -get https://ftp.ncbi.nlm.nih.gov pubmed jourcache.xml
+  fi
+}
+
+DoJournals() {
+
+  if [ ! -f "jourconv.xml" ]
+  then
+    if [ ! -f "jourcache.xml" ]
+    then
+      if [ -f "serials.txt" ]
+      then
+        JourCache |
+        grep -v DOCTYPE | grep -v ELEMENT | grep -v ATTLIST |
+        xtract -transfigure serials.txt \
+          -head "<JournalCache>" -tail "</JournalCache>" \
+          -pattern Journal -pkg Journal \
+            -block "Journal/*" -element "*" \
+            -block Journal -wrp Country -translate NlmUniqueID |
+        transmute -format > jourcache.xml
+      else
+        JourCache |
+        grep -v DOCTYPE | grep -v ELEMENT | grep -v ATTLIST |
+        transmute -format > jourcache.xml
+      fi
+    fi
+  fi
+
+}
+
+if [ -d "${extrasBase}" ]
+then
+  cd "${extrasBase}"
+
+  echo "Downloading Serials" >&2
+  DoSerials
+
+  echo "Downloading Journals" >&2
+  DoJournals
+fi

@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+grep '.' | sed '/^#/d' |
+tbl2xml -rec Rec SeqID Source Type Start End Score Strand Phase Attributes |
+xtract -rec Rec -pattern Rec -LIN "+" \
+  -group Rec -pkg Common -wrp Line -element "&LIN" \
+    -block "Rec/*" -if "?" -is-not Attributes \
+      -TAG "?" -wrp "&TAG" -element "~" \
+  -group Rec -pkg Context -wrp Item -with ";" -split Attributes |
+xtract -set GFFSet -rec GFF -pattern Rec \
+  -group "Common/*" -element "*" \
+  -group Context -pkg Attributes \
+    -block Item -TAG "Item[|=]" -wrp "&TAG" -element "Item[=|]" |
+transmute -format

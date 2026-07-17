@@ -1,0 +1,49 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-taxonomy
+
+# variable contains taxonomy-database-specific xtract indexing instructions
+read -r -d '' idxtxt <<- EOS
+xtract -set IdxDocumentSet -rec IdxDocument \
+  -pattern TaxonInfo -UID TaxonInfo/TaxID \
+    -wrp IdxUid -element "&UID" -clr -rst -tab "" \
+    -group TaxonInfo -pkg IdxSearchFields \
+      -block TaxonInfo \
+        -wrp UID -pad "&UID" \
+        -wrp SCIN -element Scientific \
+        -wrp GNSP -element Binomial \
+        -wrp COMN -element Common \
+        -wrp COMN -element GenBank \
+        -wrp TXSY -element Synonym \
+        -wrp TXDV -element Division -element Division@code \
+        -wrp RANK -element Rank \
+        -wrp LNGE -element Lineage \
+        -wrp TREE -element Tree \
+        -wrp GC -element Nuclear \
+        -wrp MGC -element Mitochondrial \
+        -wrp PGC -element Plastid \
+        -wrp HGC -element Hydrogenosome \
+        -wrp TAXA -element Domain \
+        -wrp TAXA -element Kingdom \
+        -wrp TAXA -element Phylum \
+        -wrp TAXA -element Class \
+        -wrp TAXA -element Order \
+        -wrp TAXA -element Family \
+        -wrp TAXA -element Genus \
+        -wrp TAXA -element Species \
+        -wrp MODS -pfx "<MODS>subspecies " -alnum Subspecies \
+        -wrp MODS -pfx "<MODS>serovar " -alnum Serovar \
+        -wrp MODS -pfx "<MODS>strain " -alnum Strain \
+        -wrp MODS -pfx "<MODS>substrain " -alnum Substrain \
+        -wrp MODS -pfx "<MODS>clade " -alnum Clade \
+        -wrp MODS -pfx "<MODS>note " -alnum Note \
+        -wrp VCHR -element SpID \
+      -block TaxonInfo -if Subspecies -wrp PROP -lbl "Has Subspecies" \
+      -block TaxonInfo -if Strain -wrp PROP -lbl "Has Strain" \
+      -block TaxonInfo -if Substrain -wrp PROP -lbl "Has Substrain" \
+      -block TaxonInfo -if Clade -wrp PROP -lbl "Has Clade" \
+      -block TaxonInfo -if Serovar -wrp PROP -lbl "Has Serovar"
+EOS
+
+IncrementalIndex "${idxtxt}"

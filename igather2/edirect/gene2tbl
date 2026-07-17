@@ -1,0 +1,29 @@
+#!/bin/bash -norc
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+xtract -set Set -pattern Entrezgene \
+  -wrp GENEID -GENEID Gene-track_geneid -wrp SYMBOL -SYMBOL Gene-ref_locus \
+  -division Entrezgene_comments \
+    -group Gene-commentary -if Gene-commentary_heading -equals Interactions \
+      -branch "*/Gene-commentary" -pkg Rec -element "&GENEID" "&SYMBOL" \
+        -block "Gene-commentary/*" -element "*" |
+xtract -transform <( echo -e "1\tSOURCE\n2\tPRODUCT\n3\tOTHERGENE\n4\tINTERACT\n" ) \
+  -rec Rec -pattern Rec -if "#Other-source" -eq 4 \
+    -wrp DESCR -element Gene-commentary_text -wrp PMIDS -sep "|" -element PubMedId \
+    -group GENEID -element "*" \
+    -group SYMBOL -element "*" \
+    -group Other-source -PS "+" -DB "" -ID "" -AC "" \
+      -DB Dbtag_db -ID -first "Object-id_str,Object-id_id" -AC Other-source_anchor \
+      -branch Other-source -DBID "" -ACDBID "" \
+        -block Other-source -if "&DB" -and "&ID" \
+          -sep ":" -DBID "&DB,&ID" \
+        -block Other-source -if "&AC" -and "&DBID" \
+          -sep " [" -sfx "]" -ACDBID "&AC,&DBID"\
+        -block Other-source \
+          -pfx "<" -sfx ">" -translate "&PS" -rst \
+          -first "&ACDBID,&AC,&DBID" \
+          -pfx "</" -sfx ">" -translate "&PS" |
+xtract -pattern Rec -def "-" \
+  -element GENEID SYMBOL PRODUCT INTERACT OTHERGENE COMPLEX SOURCE PMIDS DESCR

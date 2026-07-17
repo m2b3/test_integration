@@ -1,0 +1,105 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-pubmed
+
+stem=false
+
+currentDate=$(date +%Y)
+
+# variable contains pubmed-database-specific xtract indexing instructions
+# do not quote EOS, or it will suppress expansion of currentDate variable within the "HERE" document
+# no double quotes needed around $currentDate
+read -r -d '' idxtxt <<- EOS
+xtract -set IdxDocumentSet -rec IdxDocument \
+  -pattern PubmedArticle -UID MedlineCitation/PMID -LEN -len "*" -YR "()" -HS "()" \
+    -wrp IdxUid -element "&UID" -clr -rst -tab "" \
+    -group PubmedArticle -pkg IdxSearchFields \
+      -block PubmedArticle -wrp UID -pad "&UID" \
+      -block PubmedArticle -wrp SIZE -inc "&LEN" \
+      -block PubmedArticle -YR -year "PubDate/*" \
+      -block PubmedData/History -MN -min Year \
+      -block PubmedArticle -wrp YEAR -first "&YR,&MN" \
+      -block PubmedArticle -if PubDate/Month -unit PubDate -wrp DATE -reg "/" -exp " " -date "*" \
+      -block PubmedArticle -unless PubDate/Month \
+        -subset PubMedPubDate -if "@PubStatus" -equals pubmed -unit PubMedPubDate -wrp DATE -reg "/" -exp " " -date "*" \
+      -block PubmedArticle -unit DateRevised -wrp RDAT -reg "/" -exp " " -date "*" \
+      -block MedlineJournalInfo -wrp JOUR -element MedlineTA NlmUniqueID ISSNLinking \
+      -block Article/Journal -wrp JOUR -jour Title ISOAbbreviation -element ISSN -wrp VOL -element Volume -wrp ISS -element Issue \
+      -block Article/Pagination -wrp PAGE -page MedlinePgn \
+      -block Article/Language -wrp LANG -element Language \
+      -block AuthorList -wrp ANUM -num Author/LastName \
+      -block AuthorList/Author -position first -wrp FAUT -sep " " -author LastName,Initials \
+      -block AuthorList/Author -if LastName -sep " " -LAST LastName,Initials \
+      -block PubmedArticle -if "&LAST" -wrp LAUT -author "&LAST" \
+      -block AuthorList/Author -wrp CSRT -prose CollectiveName \
+      -block AuthorList/Author -wrp AUTH -sep " " -author LastName,Initials \
+      -block InvestigatorList/Investigator -wrp INVR -sep " " -author LastName,Initials \
+      -block PubmedArticle -wrp TITL -indexer ArticleTitle \
+      -block PubmedArticle -wrp TIAB -indexer ArticleTitle,Abstract/AbstractText \
+      -block PubmedArticle -wrp KYWD -element KeywordList/Keyword \
+      -block PubmedArticle -wrp PAIR -pairx ArticleTitle \
+      -block PublicationType -wrp PTYP -element PublicationType \
+      -block PubmedData/ArticleIdList \
+        -subset ArticleId -if "@IdType" -equals doi -ALN -alnum ArticleId -wrp DOI -mirror "&ALN" \
+        -subset ArticleId -if "@IdType" -equals pmc -wrp PMCID -element "ArticleId[PMC|]" \
+      -block CommentsCorrections -wrp PROP -prop "@RefType" \
+      -block PublicationStatus -wrp PROP -prop PublicationStatus \
+      -block Abstract -if AbstractText -wrp PROP -lbl "Has Abstract" \
+      -block MedlineCitation -if CoiStatement -wrp PROP -lbl "Conflict of Interest Statement" \
+      -block Journal -if MedlineDate -wrp PROP -lbl "Medline Date" \
+        -subset MedlineDate -if "%MedlineDate" -lt 4 -wrp PROP -lbl "Bad Date" \
+        -subset MedlineDate -if "%MedlineDate" -eq 9 -and "MedlineDate[5:5]" -equals " " \
+          -and "MedlineDate[1:4]" -consists-of "0123456789" -and "MedlineDate[6:9]" -consists-of "0123456789" \
+            -wrp PROP -lbl "Suspicious Date" \
+      -block PubDate -if Year -and "%Year" -lt 4 -wrp PROP -lbl "Bad Date" \
+      -block PubMedPubDate -if "%Year" -lt 4 -wrp PROP -lbl "Bad Date" \
+      -block JournalIssue -if "@CitedMedium" -is-not Internet \
+        -subset PubDate -if Year -gt $currentDate -wrp PROP -lbl "Future Date" \
+      -block PubMedPubDate -if Year -gt $currentDate -and "@PubStatus" -is-not pmc-release -wrp PROP -lbl "Future Date" \
+      -block MedlineCitation -if "PMID@Version" -gt 1 -wrp PROP -lbl "Versioned" \
+      -block Reference/ArticleIdList/ArticleId \
+        -if "@IdType" -equals pubmed -and "%ArticleId" -gt 8 -and ArticleId -consists-of "0123456789" \
+          -wrp PROP -lbl "Bad Reference" \
+      -block PubmedArticle -subset DELETE -wrp PROP -lbl "Deleted" \
+      -block PubmedArticle -meshcode "MeshHeading/DescriptorName@UI,Chemical/NameOfSubstance@UI,SupplMeshName@UI" \
+      -block MeshHeading/QualifierName -wrp SUBH -element QualifierName \
+      -block MeshHeading/DescriptorName -wrp MESH -element DescriptorName \
+      -block Chemical/NameOfSubstance -wrp SUBS -element NameOfSubstance
+EOS
+
+# optional fields - use pubmed.ini [index] fields="..."
+
+hasStem=$( echo "$fields" | tr ' ' '\n' | grep -w "STEM" )
+if [ -n "$hasStem" ]
+then
+  idxtxt=$( echo "$idxtxt -block PubmedArticle -wrp STEM -indexer ArticleTitle,Abstract/AbstractText" )
+fi
+
+hasGrant=$( echo "$fields" | tr ' ' '\n' | grep -w "GRNT" )
+if [ -n "$hasGrant" ]
+then
+  idxtxt=$( echo "$idxtxt -block PubmedArticle -wrp GRNT -element Grant/GrantID" )
+fi
+
+hasJrnl=$( echo "$fields" | tr ' ' '\n' | grep -w "JRNL" )
+if [ -n "$hasJrnl" ]
+then
+  idxtxt=$( echo "$idxtxt -block Article/Journal -wrp JRNL -element Title" )
+fi
+
+hasWord=$( echo "$fields" | tr ' ' '\n' | grep -w "WORD" )
+if [ -n "$hasWord" ]
+then
+  idxtxt=$( echo "$idxtxt -block PubmedArticle -wrp WORD -words ArticleTitle,Abstract/AbstractText" )
+fi
+
+hasMajr=$( echo "$fields" | tr ' ' '\n' | grep -w "MAJR" )
+if [ -n "$hasMajr" ]
+then
+  idxtxt=$( echo "$idxtxt -block MeshHeading/DescriptorName -if @MajorTopicYN -equals Y -wrp MAJR -element DescriptorName" )
+fi
+
+# execute incremental indexing using constructed xtract command in "HERE" document
+
+IncrementalIndex "${idxtxt}" "${extrasBase}/meshtree.txt"

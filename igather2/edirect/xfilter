@@ -1,0 +1,259 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  xfilter
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   01/11/2025
+#
+# ==========================================================================
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/xcommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/xcommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/xcommon.sh
+
+# initialize specific flags
+
+dbase=""
+debug=false
+raw=false
+db_argument_used=false
+minimal_arguments=false
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -version )
+      version=$( einfo -version )
+      echo "$version"
+      exit 0
+      ;;
+    -h | -help | --help | help )
+      version=$( einfo -version )
+      echo "xfilter $version"
+      echo ""
+      echo "USAGE: xfilter"
+      echo "       -query"
+      echo "       query arguments"
+      echo ""
+      echo "EXAMPLES"
+      echo ""
+      echo "  ... | xfilter -query \"2020:2025 [YEAR]\""
+      echo ""
+      echo "  xsearch -db pubmed -query \"Hoffmann PC [AUTH]\" |"
+      echo "  elink -related |"
+      echo "  xfilter -query \"Dopamine [MESH] AND Deficiency [SUBH]\" |"
+      echo "  efetch -format apa"
+      echo ""
+      exit 0
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+    -raw )
+      raw=true
+      shift
+      ;;
+    -debug )
+      debug=true
+      shift
+      ;;
+    -path | -master )
+      # ignore for backward compatibility, but now requiring environment variable for path
+      # target=$2
+      shift
+      shift
+      ;;
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      db_argument_used=true
+      ;;
+    -id )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      ids="$1"
+      shift
+      while [ $# -gt 0 ]
+      do
+        case "$1" in
+          -* )
+            break
+            ;;
+          * )
+            # concatenate run of UIDs with commas
+            ids="$ids,$1"
+            shift
+            ;;
+        esac
+      done
+      ;;
+    -input )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      input="$1"
+      shift
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+# check for ENTREZ_DIRECT message or piped UIDs unless database and UIDs provided in command line
+
+if [ -z "$dbase" ]
+then
+  ParseStdin
+elif [ -z "$ids" ] && [ -z "$input" ]
+then
+  ParseStdin
+fi
+
+# require explicit database in argument or piped message
+if [ -z "$dbase" ]
+then
+  echo "Must supply database in -db argument"
+  exit 1
+fi
+
+SetLocalArchiveFolders "$dbase"
+
+# normalize date arguments
+
+FixDateConstraints
+
+if [ $# -lt 1 ]
+then
+  minimal_arguments=true
+  if [ "$db_argument_used" = false ]
+  then
+    echo "ERROR: Insufficient arguments given to xfilter" >&2
+    exit 1
+  fi
+fi
+
+# call rchive -query
+
+uids=""
+flt=""
+
+val="$1"
+shift
+case "$val" in
+  -query )
+    case "$*" in
+      "AND "* | "OR "* | "NOT "* )
+        uids=$( GetUIDs | word-at-a-time | rchive -db "$dbase" -query "[PIPE] $*" )
+        ;;
+      "[PIPE] "* )
+        uids=$( GetUIDs | word-at-a-time | rchive -db "$dbase" -query "$*" )
+        ;;
+      *)
+        uids=$( GetUIDs | word-at-a-time | rchive -db "$dbase" -query "[PIPE] AND $*" )
+        ;;
+   esac
+    ;;
+  -* )
+    exec >&2
+    echo "ERROR: Unrecognized option $val" >&2
+    exit 1
+    ;;
+  * )
+    if [ "$db_argument_used" = true ] && [ "$minimal_arguments" = true ]
+    then
+      uids=$( GetUIDs )
+    else
+      exec >&2
+      echo "ERROR: Unrecognized argument $val" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+if [ -n "$uids" ]
+then
+  if [ "$raw" = true ]
+  then
+    echo "$uids"
+  else
+    flt=$( echo "$uids" | sed -e 's/^/  <Id>/' -e 's/$/<\/Id>/' )
+    num=$( echo "$uids" | wc -l | tr -d ' ' )
+    echo "<ENTREZ_DIRECT>"
+    if [ -n "$dbase" ]
+    then
+      echo "  <Db>${dbase}</Db>"
+    fi
+    if [ -n "$num" ]
+    then
+      echo "  <Count>${num}</Count>"
+    fi
+    if [ -n "$flt" ]
+    then
+      echo "$flt"
+    fi
+    echo "  <Source>Local</Source>"
+    echo "</ENTREZ_DIRECT>"
+  fi
+fi
+
+exit 0

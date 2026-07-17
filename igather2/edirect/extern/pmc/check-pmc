@@ -1,0 +1,37 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# check-pmc
+
+if [ -d "${sourceBase}" ]
+then
+  cd "${sourceBase}"
+
+  current=$(
+    ls *.tar.gz 2>/dev/null |
+    grep baseline | cut -d '.' -f 4 | sort -f | tail -n 1
+  )
+
+  latest=$(
+    nquire -lst ftp://ftp.ncbi.nlm.nih.gov/pub/pmc/oa_bulk/oa_comm/xml |
+    grep baseline | grep ".tar.gz" |
+    cut -d '.' -f 4 | sort -f | tail -n 1
+  )
+
+  if [ -n "$current" ] && [ -n "$latest" ]
+  then
+    if [ "$current" != "$latest" ]
+    then
+      DisplayError "Need to update PMC release files from ${current} to ${latest} by first running archive-pmc -zap"
+      result="1"
+    else
+      DisplayNote "PMC files starting at ${current} are using current release"
+    fi
+  elif [ -z "$current" ]
+  then
+    DisplayWarning "Missing current files"
+  elif [ -z "$latest" ]
+  then
+    DisplayWarning "Missing latest files"
+  fi
+fi

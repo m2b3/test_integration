@@ -1,0 +1,13 @@
+#!/bin/bash -norc
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+binary=$( command -v perl )
+if [ ! -x "$binary" ]
+then
+  echo "ERROR: required perl helper is not present" >&2
+  exit 1
+fi
+
+perl -e 'print sort { length($a) <=> length($b) } <>'

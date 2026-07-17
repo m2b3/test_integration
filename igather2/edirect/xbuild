@@ -1,0 +1,1879 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  xbuild
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   07/14/2025
+#
+# ==========================================================================
+
+# environment variable turns on shell tracing
+
+if [ -n "${EDIRECT_TRACE}" ] && [ "${EDIRECT_TRACE}" = true ]
+then
+  set -x
+fi
+
+# initialize common flags
+
+total_start=$(date "+%s")
+
+osname=$( uname -s | sed -e 's/_NT-.*$/_NT/; s/^MINGW[0-9]*/CYGWIN/' )
+
+dbase=""
+project=""
+
+folder=""
+
+custom=""
+
+step=""
+skip=""
+
+archiveBase=""
+sentinelsBase=""
+dataBase=""
+postingsBase=""
+sourceBase=""
+extrasBase=""
+invertBase=""
+collectBase=""
+mergedBase=""
+scratchBase=""
+currentBase=""
+invertedBase=""
+temporaryBase=""
+
+localPaths=""
+
+edirectBase=""
+externBase=""
+
+# control flags set by command-line arguments
+
+useFtp=true
+useHttps=false
+noAspera=false
+transportProtocol=""
+
+info=false
+
+check=true
+
+datafiles=true
+download=true
+generate=true
+populate=true
+resolve=true
+
+e2index=false
+e2invert=false
+e2collect=false
+e2merge=false
+e2post=false
+
+darkMode=false
+darkFlag=""
+
+logMode=false
+
+level=""
+
+mergeDone=false
+completed=false
+
+clean=false
+scrap=false
+scrub=false
+scour=false
+erase=false
+zap=false
+scratch=false
+
+DAT=""
+DWN=""
+GEN=""
+POP=""
+RES=""
+
+IDX=""
+INV=""
+COL=""
+MRG=""
+PST=""
+
+# set up colors for error report
+
+ColorSetup() {
+
+  if [ -z "$TERM" ] || [ ! -t 2 ]
+  then
+    RED=""
+    BLUE=""
+    BOLD=""
+    FLIP=""
+    INIT=""
+  elif command -v tput >/dev/null
+  then
+    RED="$(tput setaf 1)"
+    BLUE="$(tput setaf 4)"
+    BOLD="$(tput bold)"
+    FLIP="$(tput rev)"
+    INIT="$(tput sgr0)"
+  else
+    # assume ANSI
+    escape="$(printf '\033')"
+    RED="${escape}[31m"
+    BLUE="${escape}[34m"
+    BOLD="${escape}[1m"
+    FLIP="${escape}[7m"
+    INIT="${escape}[0m"
+  fi
+  LOUD="${INIT}${RED}${BOLD}"
+  INVT="${LOUD}${FLIP}"
+  # clear color on terminal if "export EDIRECT_TRACE=true" has been used
+  echo "${INIT}" > /dev/null
+}
+
+ColorSetup
+
+# highlighted error and warning functions
+
+DisplayError() {
+
+  if [ $# -gt 0 ]
+  then
+    msg="$1"
+    echo "${INVT} ERROR: ${LOUD} ${msg}${INIT}" >&2
+  fi
+}
+
+DisplayWarning() {
+
+  if [ $# -gt 0 ]
+  then
+    msg="$1"
+    echo "${INVT} WARNING: ${LOUD} ${msg}${INIT}" >&2
+  fi
+}
+
+DisplayNote() {
+
+  if [ $# -gt 0 ]
+  then
+    msg="$1"
+    echo "${INVT} NOTE: ${LOUD} ${msg}${INIT}" >&2
+  fi
+}
+
+DisplayLog() {
+
+  if [ $# -gt 0 ]
+  then
+    msg="$1"
+    echo "${INVT} LOG: ${LOUD} ${msg}${INIT}" >&2
+  fi
+}
+
+# get paths to edirect and extern folders
+
+hasxtract=$( command -v xtract )
+if [ -x "$hasxtract" ]
+then
+  edirectBase=${hasxtract%/*}
+  externBase="${edirectBase}/extern"
+fi
+
+if [ -z "$edirectBase" ] || [ "$edirectBase" = "" ] || [ ! -d "$edirectBase" ]
+then
+  DisplayError "Unable to find database-specific archive scripts."
+  exit 1
+fi
+
+# parse ConfigFile XML object
+
+ParseConfig() {
+
+  mesg=$1
+  objc=$2
+  shift 2
+
+  if [ -z "$mesg" ]
+  then
+    return 1
+  fi
+
+  while [ $# -gt 0 ]
+  do
+    var=$1
+    fld=$2
+    shift 2
+    value=$( echo "$mesg" | xtract -pattern Rec -ret "" -element "$fld" )
+    if [ -n "$value" ]
+    then
+      eval "$var=\$value"
+    fi
+  done
+
+  return 0
+}
+
+# parse ArchivePaths XML object returned by rchive -local
+
+ParseArchivePaths() {
+
+  mesg=$1
+  objc=$2
+  shift 2
+
+  if [ -z "$mesg" ]
+  then
+    return 1
+  fi
+
+  object=$( echo "$mesg" | tr -d '\n' | sed -n "s|.*<$objc>\\(.*\\)</$objc>.*|\\1|p" )
+  if [ -z "$object" ]
+  then
+    return 2
+  fi
+
+  while [ $# -gt 0 ]
+  do
+    var=$1
+    fld=$2
+    shift 2
+    value=$( echo "$object" | sed -n "s|.*<$fld>\\(.*\\)</$fld>.*|\\1|p" )
+    if [ -n "$value" ]
+    then
+      if [ -n "$osname" ] && [ "$osname" = "CYGWIN_NT" -a -x /bin/cygpath ]
+      then
+        value=$( cygpath -w "$value" )
+      fi
+
+      # remove trailing slash
+      value=${value%/}
+
+      eval "$var=\$value"
+    fi
+  done
+
+  return 0
+}
+
+# process common control flags
+
+CheckForArgumentValue() {
+
+  tag="$1"
+  rem="$2"
+
+  if [ "$rem" -lt 2 ]
+  then
+    DisplayError "Missing ${tag} argument"
+    exit 1
+  fi
+}
+
+# read command line arguments, set dbase and folder variables
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -version )
+      version=$( einfo -version )
+      echo "$version"
+      exit 0
+      ;;
+    -h | -help | --help | help )
+      version=$( einfo -version )
+      echo "xbuild $version"
+      echo ""
+      echo "  -step"
+      echo ""
+      echo "    SET"
+      echo "    CHK"
+      echo "    DAT"
+      echo "    DWN"
+      echo "    GEN"
+      echo "    POP"
+      echo "    RES"
+      echo "    IDX"
+      echo "    INV"
+      echo "    COL"
+      echo "    MRG"
+      echo "    PST"
+      echo ""
+      exit 0
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+
+    -db | -dbase )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+    -project )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      project="$1"
+      shift
+      ;;
+
+    -clean | -clear | -scrap | -scrub | -scour | -erase | -zap )
+      level="$1"
+      # remove leading hyphen
+      level="${level:1}"
+      shift
+      ;;
+
+    -info )
+      info=true
+      shift
+      ;;
+
+    -daily )
+      e2index=true
+      e2invert=true
+      datafiles=true
+      shift
+      ;;
+    -index | -reindex )
+      e2index=true
+      e2invert=true
+      e2collect=true
+      e2merge=true
+      e2post=true
+      datafiles=true
+      shift
+      ;;
+
+    -ftp )
+      useFtp=true
+      useHttps=false
+      noAspera=true
+      transportProtocol="$tag"
+      export EDIRECT_NO_ASPERA=true
+      shift
+      ;;
+    -http | -https )
+      useFtp=false
+      useHttps=true
+      transportProtocol="$tag"
+      shift
+      ;;
+
+    -step )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      step="$1"
+      shift
+      ;;
+
+    -skip )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      skip="$1"
+      shift
+      ;;
+
+    -dark )
+      darkMode=true
+      darkFlag="$1"
+      shift
+      ;;
+    -log )
+      logMode=true
+      shift
+      ;;
+
+    -custom )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      custom="$1"
+      shift
+      ;;
+
+    -* )
+      DisplayError "'$1' is not a recognized command"
+      exit 1
+      ;;
+    * )
+      DisplayError "'$1' is not a recognized option"
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$dbase" ] || [ "$dbase" = "" ]
+then
+  DisplayError "Missing -db argument"
+  exit 1
+fi
+
+if [ -z "$project" ] || [ "$project" = "" ]
+then
+  # default to extern folder with same name as database
+  project="$dbase"
+fi
+
+# set project folder within extern directory
+
+if [ "$project" = "$dbase" ]
+then
+  # primary database
+  folder="${dbase}"
+else
+  # secondary project
+  folder="${dbase}-${project}"
+fi
+
+if [ -z "$folder" ] || [ "$folder" = "" ]
+then
+  DisplayError "Project folder is not set"
+  exit 1
+fi
+
+# read project-specific configuration file
+
+if [ ! -f "${externBase}/${folder}/${project}.ini" ]
+then
+  DisplayError "Missing ${project}.ini configuration file"
+  exit 1
+fi
+
+config=$( cat "${externBase}/${folder}/${project}.ini" | ini2xml )
+
+if [ -z "$config" ] || [ "$config" = "" ]
+then
+  DisplayError "Unable to read ${project}.ini configuration file"
+  exit 1
+fi
+
+# -dark mode skips all steps that download data from the network
+
+if [ "$darkMode" = true ]
+then
+  # suppress all steps with obligatory network access
+  info=false
+  check=false
+  datafiles=false
+  download=false
+fi
+
+# all but original pubmed and pmc archives need Go compiler installed
+
+needsGoCompiler=false
+
+if [ "$project" != "pubmed" ] && [ "$project" != "pmc" ]
+then
+  needsGoCompiler=true
+elif [ "$project" != "$dbase" ]
+then
+  needsGoCompiler=true
+fi
+
+if [ "$needsGoCompiler" = true ]
+then
+  hasgo=$( command -v go )
+  if [ ! -x "$hasgo" ]
+  then
+    DisplayError "The Go (golang) compiler must be installed locally in order to process $project data. EXITING"
+    exit 1
+  fi
+fi
+
+# set paths to all local archive folders
+
+localPaths=$( rchive -local "$dbase" )
+
+if [ -z "$localPaths" ] || [ "$localPaths" = "" ]
+then
+  DisplayError "Must supply path to local data by setting EDIRECT_LOCAL_ARCHIVE environment variable. EXITING"
+  exit 1
+fi
+
+ParseArchivePaths "$localPaths" ArchivePaths \
+  archiveBase "Archive" \
+  sentinelsBase "Sentinels" \
+  dataBase "Data" \
+  postingsBase "Postings" \
+  sourceBase "Source" \
+  extrasBase "Extras" \
+  invertBase "Invert" \
+  collectBase "Collect" \
+  mergedBase "Merged" \
+  scratchBase "Scratch" \
+  currentBase "Current" \
+  indexedBase "Indexed" \
+  invertedBase "Inverted" \
+  temporaryBase "Temporary"
+
+if [ "$logMode" = true ]
+then
+  DisplayLog "DBASE $dbase, PROJECT $project"
+fi
+
+# check for archive cleaning and indexing command collision
+
+if [ -n "$level" ] && [ "$e2index" = true ]
+then
+  DisplayError "Cleaning and indexing must be done in separate commands. EXITING"
+  exit 1
+fi
+
+# normalize skip text
+
+if [ -n "$skip" ]
+then
+  # flank skip clause with spaces, change commas to space, compress multiple spaces
+  skip=$( echo " $skip " | tr ',' ' ' | tr -s ' ')
+fi
+
+# common local archive SSD preparation
+
+GetLocalArchiveFolder() {
+
+  fld="$1"
+
+  res=""
+
+  case "$fld" in
+    Archive )
+      res="$archiveBase"
+      ;;
+    Sentinels )
+      res="$sentinelsBase"
+      ;;
+    Data )
+      res="$dataBase"
+      ;;
+    Postings )
+      res="$postingsBase"
+      ;;
+    Source )
+      res="$sourceBase"
+      ;;
+    Extras )
+      res="$extrasBase"
+      ;;
+    Invert )
+      res="$invertBase"
+      ;;
+    Collect )
+      res="$collectBase"
+      ;;
+    Merged )
+      res="$mergedBase"
+      ;;
+    Scratch )
+      res="$scratchBase"
+      ;;
+    Current )
+      res="$currentBase"
+      ;;
+    Indexed )
+      res="$indexedBase"
+      ;;
+    Inverted )
+      res="$invertedBase"
+      ;;
+    Temporary )
+      res="$temporaryBase"
+      ;;
+    * )
+      ;;
+  esac
+
+  echo "$res"
+}
+
+WriteCacheDirTag() {
+
+  path="$1"
+
+  if [ ! -f "$path/CACHEDIR.TAG" ]
+  then
+  cat >$path/CACHEDIR.TAG <<EOF
+Signature: 8a477f597d28d172789f06886806bc55
+# This file is a cache directory tag created by edirect.
+# For information about cache directory tags, see:
+#   http://www.brynosaurus.com/cachedir/
+EOF
+  fi
+}
+
+HardDriveWarning() {
+
+  path="$1"
+
+  echo "" >&2
+  echo "$path IS ON A HARD DISK DRIVE, NOT THE EXPECTED SOLID-STATE DRIVE." >&2
+  echo "" >&2
+  echo "WOULD YOU LIKE TO PROCEED WITH ARCHIVING EVEN THOUGH IT IS NOT RECOMMENDED? [y/N]" >&2
+  read response
+  case "$response" in
+    [Yy]*      ) echo "OK, PROCEEDING." >&2 ;;
+    [Nn]* | '' ) echo "Holding off, then." >&2; exit 1 ;;
+    *          ) echo "Conservatively taking that as a no." >&2; exit 1 ;;
+  esac
+}
+
+NonAPFSWarning() {
+
+  path="$1"
+  ftyp="$2"
+
+  echo "" >&2
+  DisplayError "$path (OF TYPE '$ftyp') NEEDS TO BE REFORMATTED AS APFS BEFORE YOU CAN PROCEED:"
+  echo "" >&2
+  echo "  Run Utilities -> Disk Utility" >&2
+  echo "" >&2
+  echo "  Switch the View option to 'Show All Devices'." >&2
+  echo "" >&2
+  echo "  Select the entry named 'PCIe SSD Media' (not the two entries indented below it)." >&2
+  echo "" >&2
+  echo "  Click on 'Erase'." >&2
+  echo "" >&2
+  echo "  Change the Scheme to 'GUID Partition Map' (which will expand the Format choices)." >&2
+  echo "" >&2
+  echo "  Set the Format to 'APFS'." >&2
+  echo "" >&2
+  echo "  Press Erase." >&2
+  echo "" >&2
+  echo "ALSO RUN:" >&2
+  echo "" >&2
+  echo "  sudo trimforce enable" >&2
+  echo "" >&2
+  echo "IF NECESSARY TO ENABLE TRIM SUPPORT ON THE SOLID STATE DRIVE." >&2
+  echo "" >&2
+}
+
+MacInstructions() {
+
+  path="$1"
+
+  echo "" >&2
+  echo "  To prepare the $path disk for an EDirect archive, please disable:" >&2
+  echo "" >&2
+  echo "    Antivirus scanning" >&2
+  echo "    Spotlight indexing" >&2
+  echo "    Time Machine backups" >&2
+  echo "" >&2
+  echo "  for the '$path' directory:" >&2
+  echo "" >&2
+  echo "    sudo mdutil -i off ${path}" >&2
+  echo "    sudo mdutil -E ${path}" >&2
+  echo "    sudo touch ${path}/.fseventsd/no_log" >&2
+
+  desired="Indexing and searching disabled."
+  res=$( mdutil -s "$path" )
+  if [ -z "$res" ] || [[ "$res" != *"$desired"* ]]
+  then
+    echo "" >&2
+    DisplayError "SPOTLIGHT INDEXING MUST FIRST BE DISABLED FOR VOLUME '$path'"
+    echo "" >&2
+  fi
+}
+
+LinuxInstructions() {
+
+  path="$1"
+
+  echo "" >&2
+  echo "  To prepare the $path disk for an EDirect archive, please disable:" >&2
+  echo "" >&2
+  echo "    Antivirus scanning" >&2
+  echo "" >&2
+  echo "  for the '$path' directory." >&2
+  echo "" >&2
+  echo "  You may also need to run a command like:" >&2
+  echo "" >&2
+  echo "    sudo mkfs -t ext4 -b 1024 -I 128 -i 4096 /dev/<device-name>" >&2
+  echo "" >&2
+  echo "  to configure the file system for a large number of inodes." >&2
+}
+
+PrepareDrive() {
+
+  volume="$1"
+
+  if [ "$osname" = "Darwin" ]
+  then
+    root=$(df $volume | awk 'END { print $NF }')
+    sdst=$(diskutil info -plist $root | plutil -extract SolidState xml1 - -o - |  sed -ne 's,<,,pg' | sed -ne 's,/>,,pg')
+    if [ "$sdst" != "true" ]
+    then
+      HardDriveWarning "$volume"
+    fi
+    ftyp=$(diskutil info -plist $root | plutil -extract FilesystemType xml1 - -o - | sed -ne 's,</*string>,,pg')
+    if [ "$ftyp" != "apfs" ]
+    then
+      NonAPFSWarning "$volume" "$ftyp"
+    fi
+    MacInstructions "$volume"
+
+    echo "" >&2
+  fi
+
+  if [ "$osname" = "Linux" ]
+  then
+    dev=$( df $volume | awk '/^\/dev\// { print $1 }' )
+    if [ -z "$dev" ]
+    then
+      echo "Unable to confirm remote file system's underlying storage type" >&2
+      echo "" >&2
+      echo "WOULD YOU LIKE TO PROCEED WITH ARCHIVING ON THIS UNKNOWN STORAGE TYPE? [Y/N]" >&2
+      read response
+      case "$response" in
+        [Yy]*      ) echo "OK, PROCEEDING." >&2 ;;
+        [Nn]* | '' ) echo "Holding off, then." >&2; exit 1 ;;
+        *          ) echo "Conservatively taking that as a no." >&2; exit 1 ;;
+      esac
+      echo "" >&2
+    else
+      basedev=$( realpath "$dev" | sed -e 's,/dev/,,; s/\([a-z]\)[0-9]*$/\1/' )
+      isHDD=$( grep 1 /sys/block/$basedev/queue/rotational )
+      if [ -n "$isHDD" ]
+      then
+        HardDriveWarning "$volume"
+      fi
+    fi
+    LinuxInstructions "$volume"
+
+    echo "" >&2
+  fi
+
+  if [ "$osname" = "CYGWIN_NT" ]
+  then
+    echo "" >&2
+    echo "  To prepare the disk for an EDirect archive, please disable:" >&2
+    echo "" >&2
+    echo "    Antivirus scanning" >&2
+    echo "" >&2
+    echo "  for the '$volume' directory." >&2
+    echo "" >&2
+
+    if reg query 'HKLM\System\CurrentControlSet\Control\FileSystem' \
+      /v NtfsDisable8dot3NameCreation | fgrep -q 0x0
+    then
+      echo "  Also ask your administrator to set:" >&2
+      echo "" >&2
+      echo "    NtfsDisable8dot3NameCreation" >&2
+      echo "" >&2
+      echo "  in the Windows Registry." >&2
+      echo "" >&2
+    fi
+  fi
+}
+
+SetupFoldersAndPrepareDrives() {
+
+  dbs="$1"
+
+  # pm-setup -db "$dbs"
+
+  for dir in Archive Sentinels Data Postings Source Extras Invert Merged Scratch Collect Current Indexed Inverted Temporary
+  do
+    target=$( GetLocalArchiveFolder "$dir" )
+    # remove trailing slash
+    target=${target%/}
+    if [ ! -d "$target" ]
+    then
+      echo "Creating $target" >&2
+      mkdir -p "$target"
+    fi
+  done
+
+  echo "Preparing Drives" >&2
+
+  # pm-prepare -db "$dbs"
+
+  for dir in Archive Postings Source Invert Merged
+  do
+    target=$( GetLocalArchiveFolder "$dir" )
+    # remove trailing slash
+    target=${target%/}
+    if [ -n "$target" ] && [ -d "$target" ] && [ ! -f "${target}/CACHEDIR.TAG" ]
+    then
+      WriteCacheDirTag "$target"
+    fi
+  done
+
+  # note that Source is NOT included because it can reside on a rotating hard disk
+
+  for dir in Archive Data Postings Extras Invert Merged Scratch
+  do
+    target=$( GetLocalArchiveFolder "$dir" )
+    volume=$(df -P "$target" | awk 'NR==2 {print $6}')
+    echo "$volume"
+  done |
+  sort -f | uniq -i |
+  while read vol
+  do
+    if [ -n "$vol" ] && [ -d "$vol" ]
+    then
+      echo "Preparing $vol" >&2
+      PrepareDrive "$vol"
+    fi
+  done
+}
+
+function PrintTotalElapsedTime {
+
+  local L=$1
+  local T=$2
+  local D=$((T/60/60/24))
+  local H=$((T/60/60%24))
+  local M=$((T/60%60))
+  local S=$((T%60))
+  printf '%s %d second' "$L" $T 1>&2
+  (( $T > 1 )) && printf 's' 1>&2
+  if [ "$T" -gt 59 ]
+  then
+    printf ', or' 1>&2
+    (( $D > 0 )) && printf ' %d day' $D 1>&2
+    (( $D > 1 )) && printf 's' 1>&2
+    (( $H > 0 )) && printf ' %d hour' $H 1>&2
+    (( $H > 1 )) && printf 's' 1>&2
+    (( $M > 0 )) && printf ' %d minute' $M 1>&2
+    (( $M > 1 )) && printf 's' 1>&2
+    (( $S > 0 )) && printf ' %d second' $S 1>&2
+    (( $S > 1 )) && printf 's' 1>&2
+  fi
+  printf '\n' 1>&2
+}
+
+# execute cleaning command if requested
+
+if [ -n "$level" ]
+then
+  # pm-clean -db "$dbase" -project "$project" -level "$level"
+
+  # protect against sub-project deleting main database archive
+  if [ "$project" != "$dbase" ]
+  then
+    level="scratch"
+  fi
+
+  case "$level" in
+    clean | clear )
+      # delete Invert, Collect, and Merged directories
+      clean=true
+      shift
+      ;;
+    scrap )
+      # only delete Postings directories
+      scrap=true
+      shift
+      ;;
+    scrub )
+      clean=true
+      # and delete Postings directories
+      scrub=true
+      shift
+      ;;
+    scour )
+      clean=true
+      scrub=true
+      # and delete Data, Archive, and Sentinels directories
+      scour=true
+      shift
+      ;;
+    erase )
+      clean=true
+      scrub=true
+      scour=true
+      # and delete Extras directory contents
+      erase=true
+      shift
+      ;;
+    zap )
+      clean=true
+      scrub=true
+      scour=true
+      erase=true
+      # and delete Source records and all remaining directories
+      # zap=true
+      shift
+      ;;
+    scratch )
+      # only delete contents of Scratch directories
+      scratch=true
+      shift
+      ;;
+    -* )
+      exec >&2
+      echo "$0: Unrecognized option $1, cleaning must be done separately" >&2
+      exit 1
+      ;;
+    * )
+      break
+      ;;
+  esac
+
+  if [ "$scratch" = true ]
+  then
+    if [ -n "$scratchBase" ] && [ -d "$scratchBase" ]
+    then
+      echo "Deleting Scratch Directories" >&2
+      cd "$scratchBase"
+      for dir in "$scratchBase"/*
+      do
+        if [ -d "$dir" ]
+        then
+          rm -rf "$dir" &
+        fi
+      done
+    fi
+
+    if [ -n "$postingsBase" ] && [ -d "$postingsBase" ] && [ "$fields" != "" ]
+    then
+      echo "Deleting Postings" >&2
+
+      cd "$postingsBase"
+      echo "$fields" |
+      xargs -n1 echo |
+      while read dir
+      do
+        rm -rf "$postingsBase/$dir" &
+      done
+    fi
+
+    wait
+
+    # do not touch regular incrementally-indexed data from primary source records
+    exit 0
+  fi
+
+  if [ "$clean" = true ]
+  then
+
+    if [ -n "$invertBase" ] && [ -d "$invertBase" ]
+    then
+      echo "Deleting Invert" >&2
+      target="$invertBase"
+      find "$target" -name "*.inv" -delete
+      find "$target" -name "*.inv.gz" -delete
+      cd "$invertBase"
+      rm -rf * &
+    fi
+
+    if [ -n "$collectBase" ] && [ -d "$collectBase" ]
+    then
+      echo "Deleting Collect" >&2
+      target="$collectBase"
+      find "$target" -name "*.inv" -delete
+      find "$target" -name "*.inv.gz" -delete
+    fi
+
+    if [ -n "$mergedBase" ] && [ -d "$mergedBase" ]
+    then
+      echo "Deleting Merged" >&2
+      target="$mergedBase"
+      find "$target" -name "*.mrg" -delete
+      find "$target" -name "*.mrg.gz" -delete
+    fi
+
+    sleep 1
+  fi
+
+  wait
+
+  if [ "$scrub" = true ] || [ "$scrap" = true ]
+  then
+    if [ -n "$postingsBase" ] && [ -d "$postingsBase" ]
+    then
+      echo "Deleting Postings" >&2
+      cd "$postingsBase"
+      for dir in "$postingsBase"/*
+      do
+        if [ -d "$dir" ]
+        then
+          rm -rf "$dir" &
+        fi
+      done
+    fi
+
+    sleep 1
+  fi
+
+  wait
+
+  if [ "$scour" = true ]
+  then
+    if [ -n "$dataBase" ] && [ -d "$dataBase" ]
+    then
+      echo "Deleting Data" >&2
+      cd "$dataBase"
+      rm -rf *
+    fi
+
+    if [ -n "$archiveBase" ] && [ -d "$archiveBase" ]
+    then
+      echo "Deleting Archive" >&2
+      target="$archiveBase"
+      find "$target" -name "*.xml.gz" -delete
+
+      wait
+
+      cd "$archiveBase"
+      for dir in "$archiveBase"/*
+      do
+        if [ -d "$dir" ] && [ "$dir" != "Sentinels" ]
+        then
+          rm -rf "$dir" &
+        fi
+      done
+    fi
+
+    sentinelsBase=$( echo "${archiveBase}/Sentinels" )
+    if [ -n "$sentinelsBase" ] && [ -d "$sentinelsBase" ]
+    then
+      echo "Deleting Sentinels" >&2
+      target="$sentinelsBase"
+      rm -rf "*.snt"
+    fi
+
+    rm -f versioned.uid
+
+    rm -f deleted.uid
+
+    if [ ! -d "$sentinelsBase" ] && [ "$erase" = false ] && [ "$zap" = false ]
+    then
+      mkdir -p "$sentinelsBase"
+    fi
+
+    sleep 1
+  fi
+
+  wait
+
+  if [ "$erase" = true ]
+  then
+    if  [ -n "$extrasBase" ] && [ -d "$extrasBase" ]
+    then
+      echo "Deleting Extras" >&2
+      cd "$extrasBase"
+      rm -rf *
+    fi
+
+    sleep 1
+  fi
+
+  wait
+
+  if [ "$zap" = true ]
+  then
+    for dir in Archive Data Postings Extras Invert Collect Merged Scratch
+    do
+      target=$( GetLocalArchiveproject "$dir" )
+      # remove trailing slash
+      target=${target%/}
+      # remove trailing project to get volume name
+      volume=${target%/"${dbase}"}
+      echo "$volume"
+    done |
+    sort -f | uniq -i |
+    while read dir
+    do
+      if [ -n "$dir" ] && [ -d "$dir" ]
+      then
+        echo "Deleting $dir" >&2
+        cd "$dir"
+        rm -rf *
+      fi
+    done
+
+    sleep 1
+  fi
+
+  wait
+
+  total_end=$(date "+%s")
+  total=$((total_end - total_start))
+  TOT=$total
+  PrintTotalElapsedTime "TOT" "$TOT"
+  echo "" >&2
+
+  exit 0
+fi
+
+# resolve archive indices
+
+RecordsToStaging() {
+
+  cd "${archiveBase}"
+
+  for dir in ??/??/
+  do
+    for fl in "${dir}"*.records
+    do
+      if [ -s "$fl" ]
+      then
+        base=${fl%.records}
+        mv "${base}.records" "${base}.staging"
+      fi
+    done
+  done
+}
+
+RefreshIndices() {
+
+  cd "${archiveBase}"
+
+  for dir in ??/??/
+  do
+    printf "${dir%/} " >&2
+    for fl in "${dir}"*.staging
+    do
+      if [ -s "$fl" ]
+      then
+        base=${fl%.staging}
+        cat "${base}.staging" |
+        dd ibs=8000 skip=10 2> /dev/null | gunzip -c > "${base}.xml"
+        if [ -s "${base}.xml" ]
+        then
+          printf "." >&2
+          rchive -gzip -input "${base}.xml" -archive -db "$dbase" \
+            -index "$index" -delete "$delete" -pattern "$name"
+          rm "${base}.staging"
+          rm "${base}.xml"
+        fi
+      fi
+    done
+    printf "\n" >&2
+  done
+}
+
+# inverted index collection functions - produces a manageable number of intermediate files for merge step
+
+# calculate 1/15 of the computer's memory to allow optimal garbage collection for ten concurrent collections
+oneFifteenthMemory=$(( physicalMemory / 12 ))
+
+CollectStepThree() {
+
+  prefix="$1"
+
+  cd "${temporaryBase}"
+
+  for digit in {0..9}
+  do
+    filePattern="${prefix}${digit}?.inv.gz"
+    found=false
+    for file in $filePattern
+    do
+      if [ -f "$file" ]
+      then
+        found=true
+        break
+      fi
+    done
+    if [ "$found" = true ] && [ ! -f "${collectBase}/${dbase}${prefix}${digit}.inv.gz" ]
+    then
+      env GOMEMORYLIMIT="${oneFifteenthMemory}GiB" rchive -gzip -join ${prefix}${digit}?.inv.gz > "${collectBase}/${dbase}${prefix}${digit}.inv.gz" &
+    fi
+  done
+  wait
+
+  printf "." >&2
+  find "${collectBase}" -maxdepth 1 -type f -empty -delete
+}
+
+CollectSubLevel() {
+
+  cd "${temporaryBase}"
+
+  for file in *.inv.gz
+  do
+    echo "${file:0:3}"
+  done |
+  sort -V |
+  uniq |
+  while read prefix
+  do
+    CollectStepThree "$prefix"
+  done
+
+  rm -f "${temporaryBase}"/*.inv.gz
+}
+
+CollectTopLevel() {
+
+  fst="$1"
+
+  # fst is in {invertBase}
+  for sub in "${fst}"/*
+  do
+    cd "$sub"
+
+    prefix=""
+    for digit in {0..9}
+    do
+      filePattern="*${digit}?.inv.gz"
+      found=false
+      for file in $filePattern
+      do
+        if [ -f "$file" ]
+        then
+          found=true
+          prefix="${file:0:4}"
+          break
+        fi
+      done
+      if [ "$found" = true ] && [ ! -f "${temporaryBase}/${prefix}${digit}.inv.gz" ]
+      then
+        env GOMEMORYLIMIT="${oneFifteenthMemory}GiB" rchive -gzip -join *${digit}?.inv.gz > "${temporaryBase}/${prefix}${digit}.inv.gz" &
+      fi
+    done
+    wait
+
+    printf "." >&2
+    find "${temporaryBase}" -maxdepth 1 -type f -empty -delete
+  done
+}
+
+CollectAltTopLevel() {
+
+  fst="$1"
+
+  for digit in {0..9}
+  do
+    for dir in ${fst}/${digit}?
+    do
+      if [ -d "$dir" ]
+      then
+        cd "$dir"
+        filePattern="*.inv.gz"
+        found=false
+        prefix=""
+        for file in $filePattern
+        do
+          if [ -f "$file" ]
+          then
+            found=true
+            prefix="${file:0:4}"
+            break
+          fi
+        done
+        if [ "$found" = true ] && [ ! -f "${collectBase}/${prefix}.inv.gz" ]
+        then
+          env GOMEMORYLIMIT="${oneFifteenthMemory}GiB" rchive -gzip -join *.inv.gz > "${collectBase}/${prefix}.inv.gz" &
+        fi
+      fi
+    done
+    wait
+
+    printf "." >&2
+    find "${collectBase}" -maxdepth 1 -type f -empty -delete
+  done
+}
+
+# run step if command-specific helper function is present
+
+RunLocalArchiveStep() {
+
+  lbl="$1"
+  flg="$2"
+  dir="$3"
+  trg="$4"
+  cmd="$5"
+  sct="$6"
+  msg="$7"
+
+  if [ "$logMode" = true ]
+  then
+    DisplayLog "$lbl"
+  fi
+
+  # -skip excludes one or more steps
+  if [ -n "$skip" ]
+  then
+    if [[ "$skip" == *"$lbl"* ]]
+    then
+      return 0
+    fi
+  fi
+
+  # -step forces only selected step to run
+  if [ -n "$step" ]
+  then
+    if [ "$step" = "$lbl" ]
+    then
+      flg=true
+    else
+      flg=false
+    fi
+  fi
+
+  # clear variables to be loaded from configuration file section
+
+  isLink=false
+  linkFlag=""
+
+  link=""
+
+  delete=""
+  fields=""
+  index=""
+  name=""
+
+  uid=""
+  query=""
+  target=""
+  expect=""
+  success=""
+  transient=""
+
+  physicalMemory=$( xtract -stats 2>&1 | grep Mmry | tr ' ' '\n' | grep [0-9*] )
+  # calculate 3/4 of the computer's memory to allow optimal garbage collection without disk caching or memory overflow
+  threeFourthMemory=$(( physicalMemory * 3 / 4 ))
+
+
+  if [ "$flg" = true ] && [ -d "$dir" ]
+  then
+
+    seconds_start=$(date "+%s")
+
+    printTime=false
+
+    # extract configuration file section
+
+    cfgMssg=$( echo "$config" | xtract -rec Rec -pattern "ConfigFile/*" -select "$sct" | tr '\n' ' ' )
+
+    # parse configuration values into variables
+
+    if [ -n "$cfgMssg" ]
+    then
+      # in ParseConfig argument pairs, script variable name is first, configuration item name is second
+      ParseConfig "$cfgMssg" Rec \
+        link link \
+        delete delete \
+        fields fields \
+        index index \
+        name name \
+        uid uid \
+        query query \
+        target target \
+        expect expect \
+        success success \
+        transient transient
+    fi
+
+    if [ -n "$link" ] && [ "$link" = "true" ]
+    then
+      isLink=true
+      linkFlag="-link"
+    fi
+  fi
+
+  if [ "$flg" = true ] && [ -d "$dir" ]
+  then
+
+    # check to see if helper file exists
+
+    if [ -f "${externBase}/${folder}/${cmd}-${project}" ]
+    then
+
+      if [ "$logMode" = true ]
+      then
+        DisplayLog "$lbl using ${externBase}/${folder}/${cmd}-${project}"
+      fi
+
+      printTime=true
+
+      echo "$msg" >&2
+
+      # if command is in folder, construct and execute local archive build step
+      case "$cmd" in
+        check )
+          res=$( rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$transportProtocol" -custom "$custom" -step "$step" )
+          if [ -n "$res" ] && [ "$res" != "0" ]
+          then
+            echo "" >&2
+            DisplayError "Unable to proceed with mixture of releases, command $cmd, run -zap command first"
+            echo "" >&2
+            exit 1
+          fi
+          ;;
+        datafiles | download )
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$transportProtocol" -custom "$custom" -step "$step"
+          ;;
+        generate )
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$darkFlag" -custom "$custom" -step "$step"
+          ;;
+        populate )
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$darkFlag" -index "$index" -name "$name" -custom "$custom" -delete "$delete" -step "$step"
+          ;;
+        index )
+          if [ "$project" != "$dbase" ]
+          then
+            # free previous non-incremental indexed files
+            cd "${dir}"
+            rm -f *.e2x.gz
+          fi
+          # get record tag name from configuration [fetch] section, "name" entry
+          if [ -n "$config" ]
+          then
+            indMssg=$( echo "$config" | xtract -rec Rec -pattern "ConfigFile/*" -select "fetch" | tr '\n' ' ' )
+            if [ -n "$indMssg" ]
+            then
+              ParseConfig "$indMssg" Rec name name
+            fi
+          fi
+          cd "${dir}"
+          # allow [index] fields entry for optional fields to index
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$darkFlag" -fields "$fields" -name "$name" -custom "$custom" -step "$step"
+          ;;
+        invert )
+          if [ "$project" != "$dbase" ]
+          then
+            # free previous non-incremental inverted index files
+            cd "${trg}"
+            rm -f *.inv.gz
+          fi
+          cd "${dir}"
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$darkFlag" -custom "$custom" -step "$step"
+          ;;
+        merge )
+          # free previous merged files
+          cd "${trg}"
+          rm -f *.mrg.gz
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$linkFlag" "$darkFlag" -custom "$custom" -step "$step"
+          ;;
+        posting )
+          rcommon.sh -db "$dbase" -project "$project" -helper "${externBase}/${folder}/${cmd}-${project}" \
+            "$linkFlag" "$darkFlag" -fields "$fields" -custom "$custom" -step "$step"
+          ;;
+        * )
+          echo "" >&2
+          DisplayError "Unrecognized label '${lbl}', command '${cmd}'"
+          echo "" >&2
+          exit 1
+          ;;
+      esac
+    else
+
+      # otherwise use default command for latter steps
+
+      if [ "$logMode" = true ]
+      then
+        DisplayLog "$lbl using built-in default command"
+      fi
+
+      case "$cmd" in
+        resolve )
+          # only run if [ "$project" = "$dbase" ]
+          printTime=true
+          echo "$msg" >&2
+          RecordsToStaging
+          RefreshIndices
+          ;;
+        invert )
+          printTime=true
+          echo "$msg" >&2
+          # for primary projects, index and invert are now combined in the index step
+          if [ "$project" != "$dbase" ]
+          then
+            # free previous non-incremental inverted index files
+            cd "${trg}"
+            rm -f *.inv.gz
+
+            cd "${dir}"
+            for fl in *.e2x.gz
+            do
+              base=${fl%.e2x.gz}
+              echo "$base.inv"
+              gunzip -c "$fl" |
+              env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -e2invert |
+              gzip -1 > "${trg}/$base.inv.gz"
+              sleep 1
+            done
+          fi
+          ;;
+        collect )
+          if [ "$project" = "$dbase" ]
+          then
+            printTime=true
+            echo "$msg" >&2
+            # free previous collected inverted index files
+            cd "${dir}"
+            rm -f *.inv.gz
+
+            for fst in "${invertBase}"/*
+            do
+              if [ -d "$fst" ]
+              then
+                CollectTopLevel "$fst"
+                CollectSubLevel
+                # CollectAltTopLevel "$fst"
+                printf " " >&2
+              fi
+            done
+            echo "" >&2
+          fi
+          ;;
+        merge )
+          printTime=true
+          echo "$msg" >&2
+          # free previous merged files
+          cd "${trg}"
+          rm -f *.mrg.gz
+          cd "${dir}"
+          if [ "$isLink" = true ]
+          then
+            ( env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -gzip -db "$dbase" -link -merge "${trg}" *.inv.gz )
+          else
+            ( env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -gzip -db "$dbase" -merge "${trg}" *.inv.gz )
+          fi
+          ;;
+        posting )
+          printTime=true
+          echo "$msg" >&2
+          cd "${dir}"
+          for fl in *.mrg.gz
+          do
+            echo "$fl"
+          done |
+          sort |
+          xargs -n 20 echo |
+          while read files
+          do
+            if [ "$isLink" = true ]
+            then
+              ( env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -db "$dbase" -link -promote "${trg}" "$fields" $files )
+            else
+              ( env GOMEMORYLIMIT="${threeFourthMemory}GiB" rchive -db "$dbase" -promote "${trg}" "$fields" $files )
+            fi
+            echo "" >&2
+          done
+          ;;
+        * )
+          ;;
+      esac
+    fi
+
+    seconds_end=$(date "+%s")
+    seconds=$((seconds_end - seconds_start))
+
+    tim="$lbl"
+
+    if [ "$printTime" = true ]
+    then
+      echo "$tim $seconds seconds" >&2
+      echo "" >&2
+
+      eval "$tim=\$seconds"
+    fi
+
+    sleep 1
+
+    # reality checks at several stages
+
+    case "$cmd" in
+      resolve )
+        # check for presence of UID in cache
+        if [ -n "$uid" ] && [ "$uid" != "0" ] && [ -n "$expect" ]
+        then
+          rec=$( xfetch -db "$dbase" -id "$uid" < /dev/null | tr '\n' ' ' )
+          if [ -n "$rec" ]
+          then
+            case "$rec" in
+              *"$expect"* )
+                echo "Archive is OK" >&2
+                echo "" >&2
+                ;;
+              * )
+                DisplayError "Failed to find record $uid"
+                echo "" >&2
+                ;;
+            esac
+          fi
+        fi
+        ;;
+      merge )
+        # check for last expected file name
+        if [ -n "$success" ]
+        then
+          if [ -f "${mergedBase}/${success}" ]
+          then
+            mergeDone=true
+          else
+            DisplayError "Merge failed to complete - missing ${success} file."
+            echo "" >&2
+            echo "EXITING DUE TO BUILD FAILURE" >&2
+            echo "" >&2
+            # do not continue
+            e2post=false
+          fi
+        fi
+        ;;
+      posting )
+        # check for indexed search returning UID in cache
+        if [ -n "$query" ] && [ -n "$expect" ]
+        then
+          rec=$( xsearch -db "$dbase" -query "$query" < /dev/null | tr '\n' ' ' )
+          if [ -n "$rec" ]
+          then
+            case "$rec" in
+              *"$expect"* )
+                echo "Archive and Index are OK" >&2
+                echo "" >&2
+                completed=true
+                ;;
+              * )
+                DisplayError "Failed to find record $uid"
+                echo "" >&2
+                ;;
+            esac
+          fi
+        elif  [ -n "$uid" ] && [ "$uid" != "0" ] && [ -n "$target" ] && [ -n "$expect" ] && [ "$isLink" = true ]
+        then
+          rec=$( xlink -db "$dbase" -id "$uid" -target "$target" < /dev/null | tr '\n' ' ' )
+          if [ -n "$rec" ]
+          then
+            case "$rec" in
+              *"$expect"* )
+                echo "Archive is OK" >&2
+                echo "" >&2
+                ;;
+              * )
+                DisplayError "Failed to find record $uid"
+                echo "" >&2
+                ;;
+            esac
+          fi
+        fi
+        ;;
+    esac
+
+  elif  [ "$flg" = true ]
+  then
+    if [ "$logMode" = true ]
+    then
+      DisplayLog "$lbl failed due to missing directory $dir"
+    fi
+
+  elif [ -d "$dir" ]
+  then
+    if [ "$logMode" = true ]
+    then
+      DisplayLog "$lbl step not requested"
+    fi
+
+  else
+    if [ "$logMode" = true ]
+    then
+      DisplayLog "$lbl bypassed inexplicably"
+    fi
+  fi
+}
+
+echo "" >&2
+
+# START OF INDEXING
+
+date >&2
+echo "" >&2
+
+# prepare archive folders
+
+if [ -z "$step" ] || [ "$step" = "SET" ]
+then
+  SetupFoldersAndPrepareDrives "$dbase"
+fi
+
+# info step
+
+if [ "$info" = true ]
+then
+  # -info implemented by executing check-xxx script
+  ignore=$( RunLocalArchiveStep "CHK" "$info" "$sourceBase" "" "check" "" "Checking for New Release" )
+  if [ -n "$ignore" ] && [ "$ignore" != "0" ]
+  then
+    exit 1
+  fi
+  exit 0
+fi
+
+# -step download also exits immediately
+
+if [ -n "$step" ] && [ "$step" = "DWN" ]
+then
+  RunLocalArchiveStep "DWN" "$download" "$sourceBase" "" "download" "" "Downloading Release Files"
+  exit 0
+fi
+
+# proceed with indexing steps
+
+RunLocalArchiveStep "DAT" "$datafiles" "$extrasBase" "" "datafiles" "" "Downloading Data Files"
+
+RunLocalArchiveStep "DWN" "$download" "$sourceBase" "" "download" "" "Downloading Release Files"
+
+RunLocalArchiveStep "GEN" "$generate" "$extrasBase" "" "generate" "" "Generating Records"
+
+RunLocalArchiveStep "POP" "$populate" "$archiveBase" "" "populate" "archive" "Populating Archive"
+
+if [ "$project" = "$dbase" ]
+then
+  RunLocalArchiveStep "RES" "$resolve" "$archiveBase" "" "resolve" "archive" "Resolving Modified Archives"
+fi
+
+if [ "$project" = "$dbase" ]
+then
+  # index and invert are now combined in the index step for primary projects
+  RunLocalArchiveStep "IDX" "$e2index" "$invertBase" "" "index" "index" "Incremental Indexing and Inversion (fetch, index, invert, compress)"
+else
+  RunLocalArchiveStep "IDX" "$e2index" "$indexedBase" "" "index" "index" "Indexing Records"
+fi
+
+if [ "$project" != "$dbase" ]
+then
+  # separate invert step no longer needed for primary projects
+  RunLocalArchiveStep "INV"  "$e2invert" "$indexedBase" "$invertedBase" "invert" "invert" "Inverting Indices"
+fi
+
+if [ "$project" = "$dbase" ]
+then
+  RunLocalArchiveStep "COL" "$e2collect" "$invertBase" "" "collect" "collect" "Collect Inverted Sets"
+fi
+
+if [ "$project" = "$dbase" ]
+then
+  RunLocalArchiveStep "MRG" "$e2merge" "$collectBase" "$mergedBase" "merge" "merge" "Merging Inverted Indices"
+else
+  RunLocalArchiveStep "MRG" "$e2merge" "$invertedBase" "$mergedBase" "merge" "merge" "Merging Inverted Indices"
+fi
+
+# cleanup of inverted index collect files immediately upon successful completion of merge step for large databases
+
+if [ "$e2merge" = true ] && [ "$mergeDone" = true ] && [ "$e2post" = true ] && [ "$transient" = "true" ] && [ -z "$step" ]
+then
+  if [ -d "${mergedBase}" ] && [ -d "${collectBase}" ] && [ "$project" = "$dbase" ]
+  then
+    if [ -z "$skip" ] || ( [[ "$skip" != *"CLN"* ]] && [[ "$skip" != *"CLR"* ]] )
+    then
+      cd "${collectBase}"
+      rm -f *.inv.gz
+    fi
+  fi
+fi
+
+RunLocalArchiveStep "PST" "$e2post" "$mergedBase" "$postingsBase" "posting" "posting" "Producing Postings Files"
+
+# cleanup of intermediate files on successful completion of postings generation
+
+if [ "$e2post" = true ] && [ "$completed" = true ] && [ -d "${mergedBase}" ] && [ -z "$step" ]
+then
+  if [ -z "$skip" ] || ( [[ "$skip" != *"CLN"* ]] && [[ "$skip" != *"CLR"* ]] )
+  then
+    find "${mergedBase}" -name "*.mrg" -delete
+    find "${mergedBase}" -name "*.mrg.gz" -delete
+
+    if [ -d "${collectBase}" ]
+    then
+      cd "${collectBase}"
+      rm -f *.inv.gz
+    fi
+  fi
+fi
+
+# end of indexing
+
+cd
+
+if [ -z "$step" ]
+then
+
+  prjct=$(echo "$project" | tr '[:lower:]' '[:upper:]')
+
+  echo "ARCHIVE-${prjct}" >&2
+
+  echo "" >&2
+fi
+
+# print elapsed time for intermediate steps
+
+PrintTime() {
+
+  if [ "$1" = true ] && [ -n "$3" ]
+  then
+    echo "$2 $3 seconds" >&2
+  fi
+}
+
+function PrintTimeForEachStep() {
+
+  PrintTime "$datafiles" "DAT" "$DAT"
+  PrintTime "$download" "DWN" "$DWN"
+  PrintTime "$generate" "GEN" "$GEN"
+  PrintTime "$populate" "POP" "$POP"
+  PrintTime "$resolve" "RES" "$RES"
+
+  PrintTime "$e2index" "IDX" "$IDX"
+  PrintTime "$e2invert" "INV" "$INV"
+  PrintTime "$e2collect" "COL" "$COL"
+  PrintTime "$e2merge" "MRG" "$MRG"
+  PrintTime "$e2post" "PST" "$PST"
+}
+
+if [ -z "$step" ]
+then
+  PrintTimeForEachStep
+fi
+
+total_end=$(date "+%s")
+total=$((total_end - total_start))
+TOT=$total
+
+if [ -z "$step" ]
+then
+  PrintTotalElapsedTime "TOT" "$TOT"
+fi
+
+echo "" >&2
+
+date >&2
+echo "" >&2

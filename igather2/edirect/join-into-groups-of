@@ -1,0 +1,15 @@
+#!/bin/sh
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+if [ "$#" -lt 1 ]
+then
+  xargs -n 10000 echo |
+  sed 's/ /,/g' |
+  grep '.'
+else
+  xargs -n "$@" echo |
+  sed 's/ /,/g' |
+  grep '.'
+fi

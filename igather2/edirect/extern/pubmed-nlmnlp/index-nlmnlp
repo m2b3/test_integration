@@ -1,0 +1,25 @@
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# index-nlmnlp
+
+if [ -d "${indexedBase}" ]
+then
+  cd "${indexedBase}"
+
+  target="${indexedBase}"
+  echo "chemical meshname biocchem disease meshname biocdisz gene genename biocgene" |
+  xargs -n 3 |
+  while read domain transform prefix
+  do
+    gunzip -c "${extrasBase}/${domain}2pubtator3.gz" |
+    go run "${externBase}/${folder}/prep-nlmnlp.go" "${extrasBase}/${transform}.txt" | 
+    go run "${externBase}/prep-finish.go" 5000000 "${indexedBase}" "$prefix"
+  done
+
+  echo "Indexing GeneRIFs"
+
+  gunzip -c "${extrasBase}/generifs_basic.gz" |
+  go run "${externBase}/${folder}/prep-generif.go" "${extrasBase}/genename.txt" "${extrasBase}/genesyns.txt" | 
+  go run "${externBase}/prep-finish.go" 5000000 "${indexedBase}" "generifs"
+fi

@@ -1,0 +1,727 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  elink
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   06/03/2020
+#
+# ==========================================================================
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/ecommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/ecommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/ecommon.sh
+
+# initialize specific flags
+
+internal=false
+
+target=""
+
+name=""
+cmmd=""
+mode=""
+filter=""
+
+idtype=""
+related=false
+
+cited=false
+cites=false
+
+# using -complete in command line will override sampling of 10,000 input UIDs
+complete=false
+samplingUnit=1
+
+# default chunk is set to avoid causing an individual elink.fcgi request to timeout
+chunk=50
+default_chunk=true
+
+elink_debug=false
+if [ -n "${ELINK_DEBUG}" ] && [ "${ELINK_DEBUG}" = true ]
+then
+  elink_debug=true
+fi
+
+# read command-line arguments
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+    -internal )
+      internal=true
+      shift
+      ;;
+    -newmode | -oldmode )
+      shift
+      ;;
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+    -id )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      ids="$1"
+      shift
+      while [ $# -gt 0 ]
+      do
+        case "$1" in
+          -* )
+            break
+            ;;
+          * )
+            # concatenate run of UIDs with commas
+            ids="$ids,$1"
+            shift
+            ;;
+        esac
+      done
+      ;;
+    -format )
+      shift
+      if [ $# -gt 0 ]
+      then
+        shift
+        if [ "$1" = "acc" ] || [ "$1" = "accn" ]
+        then
+          idtype=acc
+        fi
+      else
+        DisplayError "Missing -format argument"
+        exit 1
+      fi
+      ;;
+    -target )
+      shift
+      if [ $# -gt 0 ]
+      then
+        if [ -n "$target" ]
+        then
+          if [ "$target" = "$1" ]
+          then
+            DisplayWarning "Redundant -target '$1' argument"
+          else
+            DisplayError "Colliding -target '$target' and '$1' arguments"
+            exit 1
+          fi
+        fi
+        target="$1"
+        shift
+      else
+        DisplayError "Missing -target argument"
+        exit 1
+      fi
+      ;;
+    -name | -linkname )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      name="$1"
+      shift
+      ;;
+    -cmd )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      cmmd="$1"
+      shift
+      ;;
+    -mode )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      mode="$1"
+      shift
+      ;;
+    -filter )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      # set term for filtering after link -related (undocumented)
+      filter="$1"
+      shift
+      ;;
+    -related )
+      related=true
+      shift
+      ;;
+    -neighbor )
+      related=true
+      shift
+      ;;
+    -cited )
+      cited=true
+      shift
+      ;;
+    -cites )
+      cites=true
+      shift
+      ;;
+    -elink_debug | -elink-debug )
+      elink_debug=true
+      shift
+      ;;
+    -complete | -full )
+      # override sampling limit of 10000 UIDs to process all input identifiers
+      complete=true
+      shift
+      ;;
+    -chunk )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      # override default chunk value (undocumented)
+      chunk=$(( $1 ))
+      default_chunk=false
+      shift
+      ;;
+    -batch )
+      # accept -batch flag from old scripts - now standard behavior
+      shift
+      ;;
+    -h | -help | --help | help )
+      echo "elink $version"
+      echo ""
+      newVersion=$( NewerEntrezDirectVersion )
+      if [ -n "$newVersion" ]
+      then
+        DisplayNote "EDirect version ${newVersion} is now available"
+        echo "" >&2
+        cat "$pth/help/elink-help.txt"
+        echo ""
+        DisplayNote "EDirect version ${newVersion} is now available"
+        echo "" >&2
+      else
+        cat "$pth/help/elink-help.txt"
+        echo ""
+      fi
+      exit 0
+      ;;
+    -* )
+      ParseCommonArgs "$@"
+      if [ "$argsConsumed" -gt 0 ]
+      then
+        shift "$argsConsumed"
+      else
+        DisplayError "Unrecognized option $1"
+        exit 1
+      fi
+      ;;
+    * )
+      DisplayError "Unrecognized argument $1"
+      shift
+      ;;
+  esac
+done
+
+FinishSetup
+
+# check for ENTREZ_DIRECT message or piped UIDs unless database and UIDs provided in command line
+
+if [ -z "$db" ]
+then
+  ParseStdin
+elif [ -z "$ids" ] && [ -z "$input" ]
+then
+  ParseStdin
+fi
+
+# additional argument reality checks
+
+if [ -n "$db" ] && [ -n "$dbase" ] && [ "$db" != "$dbase" ]
+then
+  DisplayError "Colliding -db '$db' and ENTREZ_DIRECT Db '$dbase' arguments"
+  exit 1
+fi
+
+if [ "$related" = true ]
+then
+  if [ -n "$db" ] && [ -n "$target" ] && [ "$db" != "$target" ]
+  then
+    DisplayError "-related -db '$db' incompatible with -target '$target'"
+    exit 1
+  elif [ -n "$dbase" ] && [ -n "$target" ] && [ "$dbase" != "$target" ]
+  then
+    DisplayError "-related and ENTREZ_DIRECT Db '$dbase' incompatible with -target '$target'"
+    exit 1
+  fi
+fi
+
+if [ -z "$ids$rest$qury$input" ]
+then
+  needHistory=true
+fi
+
+# take database from dbase value or -db argument
+
+if [ -z "$dbase" ]
+then
+  dbase="$db"
+fi
+
+if [ "$dbase" = "nucleotide" ]
+then
+  dbase="nuccore"
+fi
+
+# check for missing required arguments
+
+if [ -z "$dbase" ]
+then
+  DisplayError "Missing -db argument"
+  exit 1
+fi
+
+# normalize to lower-case (e.g., SRA -> sra)
+
+dbase=$( echo "$dbase" | tr '[:upper:]' '[:lower:]' )
+
+# take optional days and datetype arguments from message
+
+if [ -z "$reldate" ] && [ -n "$reldatex" ]
+then
+  reldate="$reldatex"
+fi
+if [ -z "$mindate" ] && [ -n "$mindatex" ]
+then
+  mindate="$mindatex"
+fi
+if [ -z "$maxdate" ] && [ -n "$maxdatex" ]
+then
+  maxdate="$maxdatex"
+fi
+if [ -z "$datetype" ] && [ -n "$datetypex" ]
+then
+  datetype="$datetypex"
+fi
+
+# normalize date arguments
+
+FixDateConstraints
+
+# convert spaces between UIDs to commas
+
+ids=$( echo "$ids" | sed -e "s/ /,/g; s/,,*/,/g" )
+
+# cmd aliases
+
+case "$cmmd" in
+  neighbor_history | history )
+    # EDirect is no longer supporting neighbor_history
+    cmmd="neighbor"
+    ;;
+  neighbors )
+    # silently convert known typo in existing scripts
+    cmmd="neighbor"
+    ;;
+  entrez | xid | xids | xis )
+    # aliases for edirect
+    cmmd="edirect"
+    ;;
+  uids )
+    # alias for uid
+    cmmd="uid"
+    ;;
+  score )
+    cmmd="neighbor_score"
+    if [ -z "$target" ]
+    then
+      target="$dbase"
+    fi
+    ;;
+  llibs )
+    cmmd="llinkslib"
+    ;;
+esac
+
+# special cases for target, cmd, and linkname
+
+case "$cmmd" in
+  acheck )
+    ;;
+  ncheck | lcheck | llinks | llinkslib | prlinks )
+    target=""
+    ;;
+  neighbor | neighbor_score )
+    ;;
+  edirect | uid )
+    if [ -z "$target" ]
+    then
+      target="$dbase"
+    fi
+
+    if [ -z "$name" ]
+    then
+      # set default name
+      name="${dbase}_${target}"
+    fi
+    ;;
+  * )
+    if [ -n "$cmmd" ]
+    then
+      DisplayWarning "Unrecognized -cmd option $cmmd, ignoring for now"
+      cmmd=""
+    fi
+    if [ -z "$target" ] && [ "$related" = false ] && [ "$cited" = false ] && [ "$cites" = false ]
+    then
+      DisplayError "Must supply -target or -related on command line"
+      exit 1
+    fi
+    if [ -z "$target" ]
+    then
+      target="$dbase"
+    fi
+
+    if [ -z "$name" ]
+    then
+      # set default name
+      name="${dbase}_${target}"
+      # special case for pubmed_pmc - commented out now that the link has returned
+      # if [ $name = "pubmed_pmc" ]
+      # then
+        # name="pubmed_pmc_local"
+      # fi
+    fi
+    ;;
+esac
+
+if [ "$dbase" = "nlmcatalog" ]
+then
+  DisplayError "Entrez Direct does not support links for the nlmcatalog database"
+  exit 1
+fi
+
+# input reality checks
+
+if [ "$needHistory" = true ]
+then
+
+  if [ -t 0 ]
+  then
+    DisplayError "ENTREZ_DIRECT message not piped from stdin"
+    exit 1
+  fi
+  if [ -z "$web_env" ]
+  then
+    DisplayError "WebEnv value not found in elink input"
+    exit 1
+  fi
+  if [ -z "$qry_key" ]
+  then
+    DisplayError "QueryKey value not found in elink input"
+    exit 1
+  fi
+  if [ -z "$num" ] || [ "$num" -lt 1 ]
+  then
+    # print message with count of 0 if no results to process
+    WriteEDirect "$target" "$web_env" "$qry_key" "0" "$stp" "$err"
+    exit 0
+  fi
+fi
+
+if [ "$cited" = true ] || [ "$cites" = true ]
+then
+  if [ "$dbase" != "pubmed" ]
+  then
+    DisplayError "-cited or -cites can only be used with -db pubmed"
+    exit 1
+  fi
+fi
+
+# lookup accessions in -id argument or piped from stdin
+
+if [ "$elink_debug" = true ]
+then
+  echo "LookupSpecialAccessions" >&2
+fi
+
+LookupSpecialAccessions
+
+# -cited or -cites access the NIH Open Citation Collection dataset (see PMID 31600197)
+
+LinkInIcite() {
+
+  iciteElement="$1"
+  GetUIDs |
+  join-into-groups-of "$chunk" |
+  while read uids
+  do
+    nquire -get https://icite.od.nih.gov/api/pubs -pmids "$uids" |
+    transmute -j2x |
+    xtract -pattern opt -sep "\n" -element "$iciteElement"
+  done |
+  accn-at-a-time |
+  sort -n | uniq | grep -v 'null'
+}
+
+QueryIcite() {
+
+  cits=$( LinkInIcite "$1" )
+
+  if [ -n "$cits" ]
+  then
+    # post to history appears to be broken for large sets, instantiate in message instead
+    num=$( echo "$cits" | wc -l | tr -d ' ' )
+    echo "<ENTREZ_DIRECT>"
+    echo "  <Db>${dbase}</Db>"
+    echo "  <Count>${num}</Count>"
+    echo "$cits" |
+    accn-at-a-time |
+    while read uid
+    do
+      echo "  <Id>${uid}</Id>"
+    done
+    echo "</ENTREZ_DIRECT>"
+  else
+    echo "<ENTREZ_DIRECT>"
+    echo "  <Db>pubmed</Db>"
+    echo "  <Count>0</Count>"
+    echo "</ENTREZ_DIRECT>"
+  fi
+}
+
+if [ "$cited" = true ]
+then
+  # equivalent of -name pubmed_pubmed_citedin (for pubmed records also in pmc)
+  QueryIcite "cited_by"
+
+  exit 0
+fi
+
+if [ "$cites" = true ]
+then
+  # equivalent of -name pubmed_pubmed_refs (for pubmed records also in pmc)
+  QueryIcite "references"
+
+  exit 0
+fi
+
+# helper function adds link-specific arguments (if set)
+
+RunWithLinkArgs() {
+
+  if [ "$log" = true ]
+  then
+    printf "." >&2
+  fi
+
+  AddIfNotEmpty -dbfrom "$dbase" \
+  AddIfNotEmpty -db "$target" \
+  AddIfNotEmpty -cmd "$cmmd" \
+  AddIfNotEmpty -linkname "$name" \
+  AddIfNotEmpty -retmode "$mode" \
+  AddIfNotEmpty -idtype "$idtype" \
+  AddIfNotEmpty -term "$filter" \
+  RunWithCommonArgs "$@"
+}
+
+SetSamplingUnit() {
+
+  count="$1"
+
+  if [ -n "$count" ] && [ "$count" -gt 10000 ]
+  then
+    round=$(( count + 9999 ))
+    samplingUnit=$(( round / 10000 ))
+  fi
+
+  if [ "$samplingUnit" -lt 1 ] || [ "$complete" = true ]
+  then
+    samplingUnit=1
+  fi
+}
+
+GetLinkResultsAsUIDs() {
+
+  quids=$( GetUIDs )
+  if [ -n "$quids" ]
+  then
+    count=$( echo "$quids" | wc -l | tr -d ' ' )
+    SetSamplingUnit "$count"
+
+    rquest=$(
+      echo "$quids" |
+      awk -v unit=$samplingUnit 'NR % unit == 0' |
+      join-into-groups-of "$chunk"
+    )
+
+    while read uids
+    do
+      RunWithLinkArgs nquire -url "$base" elink.fcgi -id "$uids" "$@" |
+      tr '\t' ' ' | sed '/^[[:space:]]*$/d' |
+      xtract -pattern LinkSet -sep "\n" -element Link/Id
+    done < <( echo "$rquest" ) |
+
+    sort -V | uniq -i | grep '.'
+  fi
+}
+
+if [ "$cmmd" = "uid" ]
+then
+  # use neighbor command for actual fetch
+  cmmd="neighbor"
+
+  if [ "$log" = true ]
+  then
+    printf "ELink\n" >&2
+  fi
+
+  raw=$( GetLinkResultsAsUIDs )
+
+  if [ "$log" = true ]
+  then
+    printf "\n" >&2
+  fi
+
+  echo "$raw"
+
+  exit 0
+fi
+
+if [ -z "$cmmd" ] || [ "$cmmd" = "edirect" ]
+then
+  # use neighbor command for actual fetch
+  cmmd="neighbor"
+
+  if [ "$log" = true ]
+  then
+    printf "ELink\n" >&2
+  fi
+
+  raw=$( GetLinkResultsAsUIDs )
+
+  if [ "$log" = true ]
+  then
+    printf "\n" >&2
+  fi
+
+  if [ -n "$raw" ]
+  then
+    flt=$( echo "$raw" | sed -e 's/^/  <Id>/' -e 's/$/<\/Id>/' )
+    num=$( echo "$raw" | wc -l | tr -d ' ' )
+  else
+    # clear values if results are empty
+    flt=""
+    num="0"
+  fi
+
+  seconds_end=$(date "+%s")
+  seconds_elapsed=$((seconds_end - seconds_start))
+
+  # create -format xids output
+  echo "<ENTREZ_DIRECT>"
+  if [ -n "$target" ]
+  then
+    echo "  <Db>${target}</Db>"
+  fi
+  if [ -n "$num" ]
+  then
+    echo "  <Count>${num}</Count>"
+  fi
+  if [ -n "$stp" ]
+  then
+    # increment step value
+    stp=$(( stp + 1 ))
+    echo "  <Step>${stp}</Step>"
+  fi
+  if [ -n "$flt" ]
+  then
+    echo "$flt"
+  fi
+  if [ "$quick" = true ] || [ "$quickx" = "Y" ]
+  then
+    echo "  <Quick>Y</Quick>"
+  fi
+  if [ "$debug" = true ] || [ "$debugx" = "Y" ]
+  then
+    echo "  <Debug>Y</Debug>"
+  fi
+  if [ "$log" = true ] || [ "$logx" = "Y" ]
+  then
+    echo "  <Log>Y</Log>"
+  fi
+  if [ "$timer" = true ] && [ -n "$seconds_elapsed" ]
+  then
+    echo "  <Elapsed>${seconds_elapsed}</Elapsed>"
+  fi
+  echo "</ENTREZ_DIRECT>"
+
+  exit 0
+fi
+
+GetLinkResultsAsXML() {
+
+  quids=$( GetUIDs )
+  if [ -n "$quids" ]
+  then
+    count=$( echo "$quids" | wc -l | tr -d ' ' )
+    SetSamplingUnit "$count"
+
+    rquest=$(
+      echo "$quids" |
+      awk -v unit=$samplingUnit 'NR % unit == 0' |
+      join-into-groups-of "$chunk"
+    )
+
+    while read uids
+    do
+      RunWithLinkArgs nquire -url "$base" elink.fcgi -id "$uids" "$@" |
+      tr '\t' ' ' | sed '/^[[:space:]]*$/d'
+    done < <( echo "$rquest" )
+  fi
+}
+
+# all other -cmd values return XML
+
+GetLinkResultsAsXML
+
+exit 0

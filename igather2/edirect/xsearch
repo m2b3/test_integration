@@ -1,0 +1,281 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  xsearch
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   01/11/2025
+#
+# ==========================================================================
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/xcommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/xcommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/xcommon.sh
+
+# initialize specific flags
+
+dbase=""
+debug=false
+raw=false
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -version )
+      version=$( einfo -version )
+      echo "$version"
+      exit 0
+      ;;
+    -h | -help | --help | help )
+      version=$( einfo -version )
+      echo "xsearch $version"
+      echo ""
+      echo "USAGE: xsearch"
+      echo "       -db"
+      echo "       -query | -match | -exact | -title | -words | -pairs"
+      echo "       query arguments"
+      echo ""
+      echo "EXAMPLES"
+      echo ""
+      echo "  xsearch -db pubmed -query \"(literacy AND numeracy) NOT (adolescent OR child)\""
+      echo ""
+      echo "  xsearch -db pubmed -query \"selective serotonin reuptake inhibit*\""
+      echo ""
+      echo "  xsearch -db pubmed -query \"vitamin c + + common cold\""
+      echo ""
+      echo "  xsearch -db pubmed -query \"vitamin c ~ ~ common cold\""
+      echo ""
+      echo "  xsearch -db pubmed -query \"C14.907.617.812* [TREE] AND 2015:2018 [YEAR]\""
+      echo ""
+      echo "  xsearch -db pubmed -title \"Genetic Control of Biochemical Reactions in Neurospora.\""
+      echo ""
+      echo "  xsearch -db pubmed -match \"nucleotide sequences required for tn3 transposition immunity [PAIR]\" |"
+      echo "  just-top-hits 1 | cut -f 2 |"
+      echo "  efetch -db pubmed -format abstract"
+      echo ""
+      exit 0
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+    -raw )
+      raw=true
+      shift
+      ;;
+    -debug )
+      debug=true
+      shift
+      ;;
+    -path | -master )
+      # ignore for backward compatibility, but now requiring environment variable for path
+      # target=$2
+      shift
+      shift
+      ;;
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+# require explicit database in argument or piped message
+if [ -z "$dbase" ]
+then
+  echo "Must supply database in -db argument"
+  exit 1
+fi
+
+SetLocalArchiveFolders "$dbase"
+
+val="-query"
+if [ $# -gt 0 ]
+then
+  val="$1"
+  shift
+fi
+
+group_phrases() {
+  uniq |
+  paste -sd "," - |
+  sed -e 's/^+//g' -e 's/+$//g' -e 's/,+,/+/g' -e 's/^,//g' -e 's/,$//g' -e 's/+/ /g'
+}
+
+word_pairs() {
+  while read first rest
+  do
+    if [ -z "$rest" ]
+    then
+      echo "$first"
+      continue
+    fi
+    prev=$first
+    for curr in $rest
+    do
+      echo "$prev $curr"
+      prev="$curr"
+    done
+  done
+}
+
+# call rchive -query or -match functions
+
+case "$val" in
+  -query | -phrase | -search )
+    if [ "$raw" = true ]
+    then
+      rchive -db "$dbase" -query "$*"
+    else
+      flt=""
+      uids=$( rchive -db "$dbase" -query "$*" )
+      if [ -n "$uids" ]
+      then
+        flt=$( echo "$uids" | sed -e 's/^/  <Id>/' -e 's/$/<\/Id>/' )
+        num=$( echo "$uids" | wc -l | tr -d ' ' )
+        echo "<ENTREZ_DIRECT>"
+        if [ -n "$dbase" ]
+        then
+          echo "  <Db>${dbase}</Db>"
+        fi
+        if [ -n "$num" ]
+        then
+          echo "  <Count>${num}</Count>"
+        fi
+        if [ -n "$flt" ]
+        then
+          echo "$flt"
+        fi
+        echo "  <Source>Local</Source>"
+        echo "</ENTREZ_DIRECT>"
+      fi
+    fi
+    ;;
+  -match | -partial )
+    rchive -db "$dbase" -match "$*"
+    ;;
+  -exact )
+    rchive -db "$dbase" -exact "$*"
+    ;;
+  -title )
+    rchive -db "$dbase" -title "$*"
+    ;;
+  -words )
+    echo "$*" |
+    word-at-a-time |
+    filter-stop-words |
+    while read txt
+    do
+      rchive -db "$dbase" -title "$txt"
+    done |
+    sort-uniq-count-rank -n
+    ;;
+  -pairs )
+    echo "$*" |
+    word-at-a-time |
+    filter-stop-words -plus |
+    group_phrases |
+    fmt -w 1 |
+    tr ',' ' ' |
+    word_pairs |
+    while read txt
+    do
+      rchive -db "$dbase" -title "$txt"
+    done |
+    sort-uniq-count-rank -n
+    ;;
+  -mock )
+    rchive -db "$dbase" -mock "$*"
+    ;;
+  -mocks )
+    rchive -db "$dbase" -mocks "$*"
+    ;;
+  -mockt )
+    rchive -db "$dbase" -mockt "$*"
+    ;;
+  -mockx )
+    rchive -db "$dbase" -mockx "$*"
+    ;;
+  -mockp )
+    echo "$*" |
+    word-at-a-time |
+    filter-stop-words -plus |
+    group_phrases |
+    fmt -w 1 |
+    tr ',' ' ' |
+    word_pairs
+    ;;
+  -* )
+    exec >&2
+    echo "ERROR: Unrecognized option $val" >&2
+    exit 1
+    ;;
+  * )
+    exec >&2
+    echo "ERROR: Unrecognized argument $val" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

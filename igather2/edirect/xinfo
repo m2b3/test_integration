@@ -1,0 +1,233 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  xinfo
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   01/11/2025
+#
+# ==========================================================================
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/xcommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/xcommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/xcommon.sh
+
+# initialize specific flags
+
+dbase=""
+field=""
+debug=false
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -version )
+      version=$( einfo -version )
+      echo "$version"
+      exit 0
+      ;;
+    -h | -help | --help | help )
+      version=$( einfo -version )
+      echo "xinfo $version"
+      echo ""
+      echo "USAGE: xinfo"
+      echo "       -db"
+      echo "       -count | -counts | -fields | -terms | -totals"
+      echo ""
+      echo "EXAMPLES"
+      echo ""
+      echo "  xinfo -db pubmed -fields"
+      echo ""
+      echo "  xinfo -db pubmed -terms SUBH"
+      echo ""
+      echo "  xinfo -db pubmed -count \"catabolite repress*\""
+      echo ""
+      echo "  xinfo -db pubmed -counts \"catabolite repress*\""
+      echo ""
+      echo "  xinfo -db pubmed -totals PROP"
+      echo ""
+      echo "  xinfo -db pubmed -totals YEAR |"
+      echo "  print-columns '\$2, \$1, total += \$1' |"
+      echo "  print-columns '\$1, log(\$2)/log(10), log(\$3)/log(10)' |"
+      echo "  filter-columns '\$1 >= 1800 && \$1 < YR' |"
+      echo "  xy-plot annual-and-cumulative.png"
+      echo ""
+      echo ""
+      echo "  xinfo -db taxonomy -fields"
+      echo ""
+      echo "  xinfo -db taxonomy -terms RANK"
+      echo ""
+      echo "  xinfo -db taxonomy -terms TXDV"
+      echo ""
+      echo "  xinfo -db taxonomy -totals TXDV"
+      echo ""
+      echo "  xinfo -db taxonomy -count \"super* [RANK]\""
+      echo ""
+      echo "  xinfo -db taxonomy -counts \"super* [RANK]\""
+      echo ""
+      exit 0
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+    -debug )
+      debug=true
+      shift
+      ;;
+    -path | -master )
+      # ignore for backward compatibility, but now requiring environment variable for path
+      # target=$2
+      shift
+      shift
+      ;;
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+# require explicit database in argument
+if [ -z "$dbase" ]
+then
+  echo "Must supply database in -db argument before other xinfo arguments"
+  exit 1
+fi
+
+SetLocalArchiveFolders "$dbase"
+
+if [ $# -lt 1 ]
+then
+  echo "ERROR: Insufficient arguments given to xinfo" >&2
+  exit 1
+fi
+
+# call rchive -count, -terms, or -totals functions
+
+val="$1"
+shift
+case "$val" in
+  -count )
+    rchive -db "$dbase" -count "$*" 
+    ;;
+  -counts )
+    rchive -db "$dbase" -counts "$*" 
+    ;;
+  -countr )
+    rchive -db "$dbase" -countr "$*" 
+    ;;
+  -countp )
+    rchive -db "$dbase" -countp "$*" 
+    ;;
+  -field | -fields )
+    if [ -d "${postingsBase}" ]
+    then
+      cd "$postingsBase"
+      for dr in *
+      do
+        if [ -d "$dr" ]
+        then
+          echo "$dr" | sed -e 's/-.*//'
+        fi
+      done |
+      sort -V |
+      uniq -i
+    fi
+    ;;
+  -term | -terms )
+    if [ $# -gt 0 ]
+    then
+      field=$1
+      shift
+    fi
+    if [ -n "$field" ]
+    then
+      rchive -db "$dbase" -terms "$field"
+    fi
+    ;;
+  -total | -totals )
+    if [ $# -gt 0 ]
+    then
+      field=$1
+      shift
+    fi
+    if [ -n "$field" ]
+    then
+      rchive -db "$dbase" -totals "$field"
+    fi
+    ;;
+  -* )
+    exec >&2
+    echo "ERROR: Unrecognized option $val" >&2
+    exit 1
+    ;;
+  * )
+    exec >&2
+    echo "ERROR: Unrecognized argument $val" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

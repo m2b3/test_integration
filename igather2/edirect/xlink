@@ -1,0 +1,266 @@
+#!/bin/bash
+
+# ===========================================================================
+#
+#                            PUBLIC DOMAIN NOTICE
+#            National Center for Biotechnology Information (NCBI)
+#
+#  This software/database is a "United States Government Work" under the
+#  terms of the United States Copyright Act.  It was written as part of
+#  the author's official duties as a United States Government employee and
+#  thus cannot be copyrighted.  This software/database is freely available
+#  to the public for use. The National Library of Medicine and the U.S.
+#  Government do not place any restriction on its use or reproduction.
+#  We would, however, appreciate having the NCBI and the author cited in
+#  any work or product based on this material.
+#
+#  Although all reasonable efforts have been taken to ensure the accuracy
+#  and reliability of the software and data, the NLM and the U.S.
+#  Government do not and cannot warrant the performance or results that
+#  may be obtained by using this software or data. The NLM and the U.S.
+#  Government disclaim all warranties, express or implied, including
+#  warranties of performance, merchantability or fitness for any particular
+#  purpose.
+#
+# ===========================================================================
+#
+# File Name:  xlink
+#
+# Author:  Jonathan Kans, Aaron Ucko
+#
+# Version Creation Date:   01/11/2025
+#
+# ==========================================================================
+
+pth=$( dirname "$0" )
+
+case "$pth" in
+  /* )
+    ;; # already absolute
+  *  )
+    pth=$(cd "$pth" && pwd)
+    ;;
+esac
+
+case ":$PATH:" in
+  *:"$pth":* )
+    ;;
+  * )
+    PATH="$PATH:$pth"
+    export PATH
+    ;;
+esac
+
+# handle common flags - dot command is equivalent of "source"
+
+if [ ! -f "$pth"/xcommon.sh ]
+then
+  echo "ERROR: Unable to find '$pth/xcommon.sh' file" >&2
+  exit 1
+fi
+
+. "$pth"/xcommon.sh
+
+# initialize specific flags
+
+dbase=""
+debug=false
+raw=false
+ranked=false
+target=""
+
+while [ $# -gt 0 ]
+do
+  case "$1" in
+    -version )
+      version=$( einfo -version )
+      echo "$version"
+      exit 0
+      ;;
+    -h | -help | --help | help )
+      version=$( einfo -version )
+      echo "xlink $version"
+      echo ""
+      echo "USAGE: xlink"
+      echo "       -db"
+      echo "       -target"
+      echo "       link argument"
+      echo "       [-ranked]"
+      echo ""
+      echo "EXAMPLES"
+      echo ""
+      echo "  xsearch -db pubmed -query \"Havran W* [AUTH]\" |"
+      echo "  xlink -target CITED |"
+      echo "  xfilter -query \"2020:2025 [YEAR]\" |"
+      echo "  xfetch |"
+      echo "  xtract -pattern PubmedArticle -histogram Journal/ISOAbbreviation |"
+      echo "  sort-table -nr |"
+      echo "  just-top-hits 10"
+      echo ""
+      exit 0
+      ;;
+    * )
+      break
+      ;;
+  esac
+done
+
+while [ $# -gt 0 ]
+do
+  tag="$1"
+  rem="$#"
+  case "$tag" in
+    -raw )
+      raw=true
+      shift
+      ;;
+    -rank | -ranked )
+      ranked=true
+      shift
+      ;;
+    -debug )
+      debug=true
+      shift
+      ;;
+    -path | -master )
+      # ignore for backward compatibility, but now requiring environment variable for path
+      # target=$2
+      shift
+      shift
+      ;;
+    -db )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      dbase="$1"
+      shift
+      ;;
+    -id )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      ids="$1"
+      shift
+      while [ $# -gt 0 ]
+      do
+        case "$1" in
+          -* )
+            break
+            ;;
+          * )
+            # concatenate run of UIDs with commas
+            ids="$ids,$1"
+            shift
+            ;;
+        esac
+      done
+      ;;
+    -target )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      target="$1"
+      shift
+      ;;
+    -input )
+      CheckForArgumentValue "$tag" "$rem"
+      shift
+      input="$1"
+      shift
+      ;;
+    -* )
+      exec >&2
+      echo "ERROR: Unrecognized option $val" >&2
+      exit 1
+      ;;
+    * )
+      exec >&2
+      echo "ERROR: Unrecognized argument $val" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# check for ENTREZ_DIRECT message or piped UIDs unless database and UIDs provided in command line
+
+if [ -z "$dbase" ]
+then
+  ParseStdin
+elif [ -z "$ids" ] && [ -z "$input" ]
+then
+  ParseStdin
+fi
+
+# require explicit database in argument or piped message
+if [ -z "$dbase" ]
+then
+  echo "Must supply database in -db argument"
+  exit 1
+fi
+
+SetLocalArchiveFolders "$dbase"
+
+# normalize date arguments
+
+FixDateConstraints
+
+# get database-specific parameters from $dbase.ini configuration file
+
+dest="$dbase"
+
+if [ ! -f "${pth}/extern/${dbase}/${dbase}.ini" ]
+then
+  echo "ERROR: Unable to find '$pth/extern/$dbase/$dbase.ini' file" >&2
+  exit 1
+fi
+
+mssg=$(
+  cat "${pth}/extern/${dbase}/${dbase}.ini" |
+  ini2xml |
+  xtract -rec Rec -pattern "ConfigFile/*" -select "links" |
+  tr '\n' ' '
+)
+if [ -n "$mssg" ]
+then
+  ParseConfig "$mssg" Rec dest "$target"
+fi
+
+if [ -z "$dest" ]
+then
+  echo "ERROR: Missing target from [links] section of ${dbase}.ini file, use -target in command line" >&2
+  exit 1
+fi
+
+# call rchive -link
+
+if [ "$raw" = true ]
+then
+  GetUIDs |
+  word-at-a-time |
+  rchive -db "$dbase" -link "$target"
+elif [ "$ranked" = true ]
+then
+  GetUIDs | rchive -db "$dbase" -ranked -link "$target"
+else
+  flt=""
+  uids=$( GetUIDs | word-at-a-time | rchive -db "$dbase" -link "$target" )
+  if [ -n "$uids" ]
+  then
+    flt=$( echo "$uids" | sed -e 's/^/  <Id>/' -e 's/$/<\/Id>/' )
+    num=$( echo "$uids" | wc -l | tr -d ' ' )
+    echo "<ENTREZ_DIRECT>"
+    if [ -n "$dest" ]
+    then
+      echo "  <Db>${dest}</Db>"
+    fi
+    if [ -n "$num" ]
+    then
+      echo "  <Count>${num}</Count>"
+    fi
+    if [ -n "$flt" ]
+    then
+      echo "$flt"
+    fi
+    echo "  <Source>Local</Source>"
+    echo "</ENTREZ_DIRECT>"
+  fi
+fi
+
+exit 0

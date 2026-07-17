@@ -1,0 +1,33 @@
+#!/bin/bash -norc
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+group_phrases() {
+  uniq |
+  paste -sd "," - |
+  sed -e 's/^+//g' -e 's/+$//g' -e 's/,+,/+/g' -e 's/^,//g' -e 's/,$//g' -e 's/+/ /g'
+}
+
+word_pairs() {
+  while read first rest
+  do
+    if [ -z "$rest" ]
+    then
+      echo "$first"
+      continue
+    fi
+    prev=$first
+    for curr in $rest
+    do
+      echo "$prev $curr"
+      prev="$curr"
+    done
+  done
+}
+
+word-at-a-time |
+group_phrases |
+fmt -w 1 |
+tr ',' ' ' |
+word_pairs

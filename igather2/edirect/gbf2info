@@ -1,0 +1,94 @@
+#!/bin/bash
+
+# Public domain notice for all NCBI EDirect scripts is located at:
+# https://www.ncbi.nlm.nih.gov/books/NBK179288/#chapter6.Public_Domain_Notice
+
+# efetch -db nuccore -id U54469 -format gb | gbf2info |
+# xtract -pattern GenBankInfo -ACCN accession -block feature \
+#   -def "-" -element "&ACCN" key gene product -deq "\n"
+
+# esearch -db protein -query "conotoxin AND mat_peptide [FKEY]" |
+# efetch -format gp | gbf2xml | gbf2info |
+# xtract -pattern GenBankInfo -ACCN accession \
+#   -block mat_peptide -if complete \
+#     -def "-" -element "&ACCN" "%peptide" product mol_wt peptide -deq "\n" |
+# grep -i conotoxin | sort-table -u -k 2,2n | align-columns -
+
+# HERE document for capitalizing features names that collide with qualifier names (e.g., allele, gene, operon),
+# or mapping feature names that are invalid as XML tags (e.g., -10_signal, D-loop) to valid alternatives.
+IFS='' read -r -d '' TYPEMAP <<'EOF'
+-10_signal	_10_signal
+-35_signal	_35_signal
+3'clip	3_clip
+3'UTR	3_UTR
+5'clip	5_clip
+5'UTR	5_UTR
+D-loop	D_loop
+allele	Allele
+gene	Gene
+mobile_element	Mobile_element
+operon	Operon
+satellite	Satellite
+EOF
+
+xtract -rec Rec -pattern INSDSeq -SEQ INSDSeq_sequence -MOL INSDSeq_moltype \
+  -division INSDSeq -pkg HD \
+    -wrp accession -element INSDSeq_accession-version \
+    -wrp locus -element INSDSeq_locus \
+    -wrp defline -element INSDSeq_definition \
+    -wrp length -element INSDSeq_length \
+    -wrp moltype -element "&MOL" \
+    -wrp topology -element INSDSeq_topology \
+    -wrp division -element INSDSeq_division \
+    -wrp organism -element INSDSeq_organism \
+    -wrp lineage -element INSDSeq_taxonomy \
+  -division INSDFeature -KEY INSDFeature_key -SUB "()" -FM "(1)" -GC "(1)" -pkg FT \
+    -wrp key -element "&KEY" \
+    -group INSDFeature -if INSDFeature_partial5 -or INSDFeature_partial3 -wrp partial -lbl "true" \
+    -group INSDFeature -unless INSDFeature_partial5 -or INSDFeature_partial3 -wrp complete -lbl "true" \
+    -group INSDFeature -if INSDFeature_key -is-not source \
+      -wrp operator -element INSDFeature_operator -wrp location -element INSDFeature_location \
+    -group INSDFeature -if INSDFeature_key -is-not source -pkg intervals \
+      -block INSDFeature_intervals -DOT "(..)" -COM "()" \
+        -unit INSDInterval -FR INSDInterval_from -TO INSDInterval_to \
+          -sep "" -tab "" -element "&COM,&FR,&DOT,&TO" -COM "(,)" \
+    -group INSDQualifier -unless INSDQualifier_name -equals peptide \
+      -or INSDQualifier_name -equals calculated_mol_wt \
+      -or INSDQualifier_name -equals transcription \
+      -or INSDQualifier_name -equals translation -TAG INSDQualifier_name \
+      -block INSDQualifier -if "&TAG" -equals country -TAG "(geo_loc_name)" \
+      -block INSDQualifier -wrp "&TAG" -element INSDQualifier_value \
+    -group INSDFeature -if "&KEY" -ends-with RNA -or "&KEY" -ends-with peptide \
+      -or "&KEY" -ends-with protein -or "&KEY" -equals CDS \
+      -block INSDFeature_intervals \
+        -subset INSDInterval -FR INSDInterval_from -TO INSDInterval_to \
+          -sep "" -tab "" -SEG -nucleic "&SEQ[&FR:&TO]" --SUB "&SEG" -clr \
+    -group INSDFeature -if "&KEY" -ends-with RNA \
+      -block INSDFeature -unless INSDQualifier_name -equals transcription -pkg transcription -element "&SUB" \
+    -group INSDFeature -if "&KEY" -equals CDS -and "&MOL" -is-not AA \
+      -block INSDFeature_intervals -if "&MOL" -equals mRNA -FR -first INSDInterval_from -TO -first INSDInterval_to \
+        -subset INSDFeature_intervals -if "&FR" -lt "&TO" \
+          -OFS -min INSDInterval_from,INSDInterval_to -wrp offset -dec "&OFS" \
+      -block INSDQualifier -if INSDQualifier_name -equals codon_start -FM INSDQualifier_value \
+      -block INSDQualifier -if INSDQualifier_name -equals transl_table -GC INSDQualifier_value \
+      -block INSDFeature -pkg mol_wt -molwt "&SUB" \
+      -block INSDFeature -if INSDQualifier_name -equals translation -pkg translation \
+        -subset INSDQualifier -if INSDQualifier_name -equals translation -element INSDQualifier_value \
+      -block INSDFeature -unless INSDQualifier_name -equals translation -pkg translation \
+        -gcode "&GC" -frame "&FM" -cds2prot "&SUB" \
+      -block INSDFeature -unless INSDQualifier_name -equals transcription -pkg transcription -element "&SUB" \
+    -group INSDFeature -if "&KEY" -ends-with protein \
+      -block INSDFeature -pkg mol_wt -molwt "&SUB" \
+    -group INSDFeature -if "&KEY" -ends-with peptide \
+      -block INSDFeature -pkg mol_wt -molwt-m "&SUB" -pkg peptide -element "&SUB" \
+  -division INSDSeq -pkg TL -wrp sequence -upper "&SEQ" |
+# wrap feature contents in tag derived from feature key
+xtract -transform <( echo -e "$TYPEMAP" ) -rec GenBankInfo -pattern Rec \
+  -group "HD" -pkg info -block "HD/*" -element "*" \
+  -group "FT" -KEY key -CAP "()" -TAG "()" \
+      -CAP -translate "&KEY" -TAG -first "&CAP,&KEY" \
+      -subset FT -pfx "<feature><" -sfx ">" -element "&TAG" \
+      -subset "FT/*" -element "*" \
+      -subset FT -pfx "</" -sfx "></feature>" -element "&TAG"\
+  -group "TL" -block "TL/*" -element "*" |
+transmute -format
