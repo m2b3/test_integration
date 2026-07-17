@@ -2,6 +2,21 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+load_env_file() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$path"
+  set +a
+}
+
+load_env_file "${ROOT_DIR}/.env"
+
 DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
 START_DB="${START_DB:-1}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"

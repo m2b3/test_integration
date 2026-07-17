@@ -83,10 +83,11 @@ Postgres:        localhost:5432
 
 `setup.sh` does the following:
 
+- creates local `.env` files for the root scripts, backend, frontend,
+  `scicomm_embedding`, and `igather2`
 - creates Python virtual environments for `backend`, `scicomm_embedding`, and `igather2`
 - installs backend, article pipeline/search, and PubMed ingestion dependencies
 - runs `npm install` in `frontend`
-- writes `frontend/.env` if one does not already exist
 - starts Postgres through Docker Compose
 - recreates and seeds the user database
 
@@ -94,6 +95,8 @@ Useful environment overrides:
 
 ```bash
 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
+NCBI_EMAIL=you@example.com NCBI_API_KEY=optional_key ./setup.sh
+OVERWRITE_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
 OVERWRITE_FRONTEND_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
 DOCKER_COMPOSE="sudo docker compose" ./setup.sh
 RESET_USER_DB=0 ./setup.sh
@@ -104,6 +107,10 @@ RUN_PIPELINE=1 ./setup.sh
 drops and recreates the prototype user-side tables. `RUN_PIPELINE=0` is the
 default because the article pipeline performs network fetching and embedding
 work.
+
+The generated `.env` files are intentionally still ignored by Git. Use
+`OVERWRITE_ENV=1 ./setup.sh` to regenerate all of them from the current
+environment variables.
 
 ## Article Pipeline
 
@@ -138,6 +145,9 @@ SCICOMM_ARTIFACT_DIR=/path/to/artifacts ./run.sh
 - article/search API on port `8100`
 - backend API on port `8000`
 - frontend dev server on port `5173`
+
+`run.sh` loads the root `.env` before applying defaults, so changes to ports,
+database URLs, artifact paths, or service URLs can be made there after setup.
 
 Useful environment overrides:
 

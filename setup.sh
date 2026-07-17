@@ -2,13 +2,43 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+load_env_file() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$path"
+  set +a
+}
+
+load_env_file "${ROOT_DIR}/.env"
+
 PYTHON="${PYTHON:-python3}"
 DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
-VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:8000}"
 START_DB="${START_DB:-1}"
 RESET_USER_DB="${RESET_USER_DB:-1}"
 RUN_PIPELINE="${RUN_PIPELINE:-0}"
+BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
+ARTICLE_HOST="${ARTICLE_HOST:-0.0.0.0}"
+ARTICLE_PORT="${ARTICLE_PORT:-8100}"
+FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
+FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+SCICOMM_ARTIFACT_DIR="${SCICOMM_ARTIFACT_DIR:-${ROOT_DIR}/scicomm_embedding}"
+ARTICLE_SERVICE_BASE_URL="${ARTICLE_SERVICE_BASE_URL:-http://localhost:${ARTICLE_PORT}}"
+VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+SESSION_COOKIE_SECURE="${SESSION_COOKIE_SECURE:-false}"
+NCBI_EMAIL="${NCBI_EMAIL:-you@example.com}"
+NCBI_TOOL="${NCBI_TOOL:-scicommons-monorepo}"
+NCBI_API_KEY="${NCBI_API_KEY:-}"
+EDIRECT_PREFIX="${EDIRECT_PREFIX:-}"
+OPENREVIEW_USERNAME="${OPENREVIEW_USERNAME:-}"
+OPENREVIEW_PASSWORD="${OPENREVIEW_PASSWORD:-}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -28,8 +58,64 @@ install_python_requirements() {
   "${dir}/.venv/bin/python" -m pip install -r "$requirements"
 }
 
+write_env_file() {
+  local path="$1"
+  local content="$2"
+
+  if [[ ! -f "$path" || "${OVERWRITE_ENV:-0}" == "1" ]]; then
+    echo "==> Writing ${path#${ROOT_DIR}/}"
+    printf '%s\n' "$content" > "$path"
+  else
+    echo "==> Keeping existing ${path#${ROOT_DIR}/}"
+  fi
+}
+
+shell_quote() {
+  printf '%q' "$1"
+}
+
 require_command "$PYTHON"
 require_command npm
+
+write_env_file "${ROOT_DIR}/.env" "PYTHON=$(shell_quote "$PYTHON")
+DOCKER_COMPOSE=$(shell_quote "$DOCKER_COMPOSE")
+DATABASE_URL=$(shell_quote "$DATABASE_URL")
+START_DB=$(shell_quote "$START_DB")
+RESET_USER_DB=$(shell_quote "$RESET_USER_DB")
+RUN_PIPELINE=$(shell_quote "$RUN_PIPELINE")
+BACKEND_HOST=$(shell_quote "$BACKEND_HOST")
+BACKEND_PORT=$(shell_quote "$BACKEND_PORT")
+ARTICLE_HOST=$(shell_quote "$ARTICLE_HOST")
+ARTICLE_PORT=$(shell_quote "$ARTICLE_PORT")
+FRONTEND_HOST=$(shell_quote "$FRONTEND_HOST")
+FRONTEND_PORT=$(shell_quote "$FRONTEND_PORT")
+SCICOMM_ARTIFACT_DIR=$(shell_quote "$SCICOMM_ARTIFACT_DIR")
+ARTICLE_SERVICE_BASE_URL=$(shell_quote "$ARTICLE_SERVICE_BASE_URL")
+VITE_API_BASE_URL=$(shell_quote "$VITE_API_BASE_URL")
+SESSION_COOKIE_SECURE=$(shell_quote "$SESSION_COOKIE_SECURE")
+NCBI_EMAIL=$(shell_quote "$NCBI_EMAIL")
+NCBI_TOOL=$(shell_quote "$NCBI_TOOL")
+NCBI_API_KEY=$(shell_quote "$NCBI_API_KEY")
+EDIRECT_PREFIX=$(shell_quote "$EDIRECT_PREFIX")
+OPENREVIEW_USERNAME=$(shell_quote "$OPENREVIEW_USERNAME")
+OPENREVIEW_PASSWORD=$(shell_quote "$OPENREVIEW_PASSWORD")"
+
+write_env_file "${ROOT_DIR}/backend/.env" "DATABASE_URL=${DATABASE_URL}
+ARTICLE_SERVICE_BASE_URL=${ARTICLE_SERVICE_BASE_URL}
+SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE}"
+
+write_env_file "${ROOT_DIR}/scicomm_embedding/.env" "SCICOMM_ARTIFACT_DIR=${SCICOMM_ARTIFACT_DIR}
+NCBI_EMAIL=${NCBI_EMAIL}
+NCBI_TOOL=${NCBI_TOOL}
+NCBI_API_KEY=${NCBI_API_KEY}
+EDIRECT_PREFIX=${EDIRECT_PREFIX}
+OPENREVIEW_USERNAME=${OPENREVIEW_USERNAME}
+OPENREVIEW_PASSWORD=${OPENREVIEW_PASSWORD}"
+
+write_env_file "${ROOT_DIR}/igather2/.env" "NCBI_EMAIL=${NCBI_EMAIL}
+NCBI_TOOL=${NCBI_TOOL}
+NCBI_API_KEY=${NCBI_API_KEY}
+EDIRECT_PREFIX=${EDIRECT_PREFIX}"
 
 install_python_requirements "backend" "${ROOT_DIR}/backend" "${ROOT_DIR}/backend/requirements.txt"
 install_python_requirements "article pipeline/search" "${ROOT_DIR}/scicomm_embedding" "${ROOT_DIR}/scicomm_embedding/requirements.txt"
@@ -42,7 +128,7 @@ echo "==> Setting up igather2 Python environment"
 echo "==> Installing frontend dependencies"
 (cd "${ROOT_DIR}/frontend" && npm install)
 
-if [[ ! -f "${ROOT_DIR}/frontend/.env" || "${OVERWRITE_FRONTEND_ENV:-0}" == "1" ]]; then
+if [[ ! -f "${ROOT_DIR}/frontend/.env" || "${OVERWRITE_FRONTEND_ENV:-0}" == "1" || "${OVERWRITE_ENV:-0}" == "1" ]]; then
   echo "==> Writing frontend/.env"
   printf 'VITE_API_BASE_URL=%s\n' "$VITE_API_BASE_URL" > "${ROOT_DIR}/frontend/.env"
 else
