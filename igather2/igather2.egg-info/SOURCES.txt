@@ -1,0 +1,10 @@
+README.md
+base.py
+pyproject.toml
+igather2.egg-info/PKG-INFO
+igather2.egg-info/SOURCES.txt
+igather2.egg-info/dependency_links.txt
+igather2.egg-info/entry_points.txt
+igather2.egg-info/requires.txt
+igather2.egg-info/top_level.txt
+tests/test_base_smoke.py

@@ -1,0 +1,2 @@
+[console_scripts]
+igather2-pubmed = base:main

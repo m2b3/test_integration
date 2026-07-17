@@ -31,6 +31,6 @@ mkdir -p "$LOG_DIR"
   echo "==> $(date -Is) Starting nightly article pipeline"
   cd "${ROOT_DIR}/scicomm_embedding"
   source .venv/bin/activate
-  python pipeline.py
+  python pipeline.py --sources arxiv pubmed
   echo "==> $(date -Is) Finished nightly article pipeline"
 } >> "${LOG_DIR}/nightly_pipeline.log" 2>&1
