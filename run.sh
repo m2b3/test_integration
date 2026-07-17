@@ -5,19 +5,26 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 load_env_file() {
   local path="$1"
+  local line key
   if [[ ! -f "$path" ]]; then
     return
   fi
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$path"
-  set +a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+    key="${line%%=*}"
+    key="${key#export }"
+    key="${key//[[:space:]]/}"
+    if [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${!key+x}" ]]; then
+      eval "export ${line}"
+    fi
+  done < "$path"
 }
 
 load_env_file "${ROOT_DIR}/.env"
 
 DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
+TRY_SUDO_DOCKER="${TRY_SUDO_DOCKER:-1}"
 START_DB="${START_DB:-1}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
@@ -37,6 +44,25 @@ require_file() {
     echo "Missing $1. Run ./setup.sh first." >&2
     exit 1
   fi
+}
+
+start_postgres() {
+  set +e
+  # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
+  # shellcheck disable=SC2086
+  $DOCKER_COMPOSE up -d db
+  local status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$TRY_SUDO_DOCKER" == "1" && "$DOCKER_COMPOSE" != sudo* ]] && command -v sudo >/dev/null 2>&1; then
+    echo "==> Docker Compose failed; retrying with sudo docker compose"
+    sudo docker compose up -d db
+    return 0
+  fi
+  return "$status"
 }
 
 cleanup() {
@@ -59,9 +85,7 @@ require_file "${ROOT_DIR}/frontend/node_modules"
 
 if [[ "$START_DB" == "1" ]]; then
   echo "==> Starting Postgres"
-  # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
-  # shellcheck disable=SC2086
-  $DOCKER_COMPOSE up -d db
+  start_postgres
 fi
 
 missing_artifacts=0

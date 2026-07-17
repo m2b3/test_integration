@@ -5,20 +5,27 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 load_env_file() {
   local path="$1"
+  local line key
   if [[ ! -f "$path" ]]; then
     return
   fi
 
-  set -a
-  # shellcheck disable=SC1090
-  source "$path"
-  set +a
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]] && continue
+    key="${line%%=*}"
+    key="${key#export }"
+    key="${key//[[:space:]]/}"
+    if [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${!key+x}" ]]; then
+      eval "export ${line}"
+    fi
+  done < "$path"
 }
 
 load_env_file "${ROOT_DIR}/.env"
 
 PYTHON="${PYTHON:-python3}"
 DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
+TRY_SUDO_DOCKER="${TRY_SUDO_DOCKER:-1}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
 START_DB="${START_DB:-1}"
 RESET_USER_DB="${RESET_USER_DB:-1}"
@@ -39,6 +46,8 @@ NCBI_API_KEY="${NCBI_API_KEY:-}"
 EDIRECT_PREFIX="${EDIRECT_PREFIX:-}"
 OPENREVIEW_USERNAME="${OPENREVIEW_USERNAME:-}"
 OPENREVIEW_PASSWORD="${OPENREVIEW_PASSWORD:-}"
+INSTALL_CPU_TORCH="${INSTALL_CPU_TORCH:-1}"
+TORCH_CPU_INDEX_URL="${TORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -56,6 +65,39 @@ install_python_requirements() {
   "$PYTHON" -m venv "${dir}/.venv"
   "${dir}/.venv/bin/python" -m pip install --upgrade pip
   "${dir}/.venv/bin/python" -m pip install -r "$requirements"
+}
+
+install_article_requirements() {
+  local dir="$1"
+  local requirements="$2"
+
+  echo "==> Setting up article pipeline/search Python environment"
+  "$PYTHON" -m venv "${dir}/.venv"
+  "${dir}/.venv/bin/python" -m pip install --upgrade pip
+  if [[ "$INSTALL_CPU_TORCH" == "1" ]]; then
+    echo "==> Installing CPU-only torch before article dependencies"
+    "${dir}/.venv/bin/python" -m pip install --index-url "$TORCH_CPU_INDEX_URL" torch
+  fi
+  "${dir}/.venv/bin/python" -m pip install -r "$requirements"
+}
+
+start_postgres() {
+  set +e
+  # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
+  # shellcheck disable=SC2086
+  $DOCKER_COMPOSE up -d db
+  local status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ "$TRY_SUDO_DOCKER" == "1" && "$DOCKER_COMPOSE" != sudo* ]] && command -v sudo >/dev/null 2>&1; then
+    echo "==> Docker Compose failed; retrying with sudo docker compose"
+    sudo docker compose up -d db
+    return 0
+  fi
+  return "$status"
 }
 
 write_env_file() {
@@ -79,6 +121,7 @@ require_command npm
 
 write_env_file "${ROOT_DIR}/.env" "PYTHON=$(shell_quote "$PYTHON")
 DOCKER_COMPOSE=$(shell_quote "$DOCKER_COMPOSE")
+TRY_SUDO_DOCKER=$(shell_quote "$TRY_SUDO_DOCKER")
 DATABASE_URL=$(shell_quote "$DATABASE_URL")
 START_DB=$(shell_quote "$START_DB")
 RESET_USER_DB=$(shell_quote "$RESET_USER_DB")
@@ -98,7 +141,9 @@ NCBI_TOOL=$(shell_quote "$NCBI_TOOL")
 NCBI_API_KEY=$(shell_quote "$NCBI_API_KEY")
 EDIRECT_PREFIX=$(shell_quote "$EDIRECT_PREFIX")
 OPENREVIEW_USERNAME=$(shell_quote "$OPENREVIEW_USERNAME")
-OPENREVIEW_PASSWORD=$(shell_quote "$OPENREVIEW_PASSWORD")"
+OPENREVIEW_PASSWORD=$(shell_quote "$OPENREVIEW_PASSWORD")
+INSTALL_CPU_TORCH=$(shell_quote "$INSTALL_CPU_TORCH")
+TORCH_CPU_INDEX_URL=$(shell_quote "$TORCH_CPU_INDEX_URL")"
 
 write_env_file "${ROOT_DIR}/backend/.env" "DATABASE_URL=${DATABASE_URL}
 ARTICLE_SERVICE_BASE_URL=${ARTICLE_SERVICE_BASE_URL}
@@ -118,7 +163,7 @@ NCBI_API_KEY=${NCBI_API_KEY}
 EDIRECT_PREFIX=${EDIRECT_PREFIX}"
 
 install_python_requirements "backend" "${ROOT_DIR}/backend" "${ROOT_DIR}/backend/requirements.txt"
-install_python_requirements "article pipeline/search" "${ROOT_DIR}/scicomm_embedding" "${ROOT_DIR}/scicomm_embedding/requirements.txt"
+install_article_requirements "${ROOT_DIR}/scicomm_embedding" "${ROOT_DIR}/scicomm_embedding/requirements.txt"
 
 echo "==> Setting up igather2 Python environment"
 "$PYTHON" -m venv "${ROOT_DIR}/igather2/.venv"
@@ -137,9 +182,7 @@ fi
 
 if [[ "$START_DB" == "1" ]]; then
   echo "==> Starting Postgres"
-  # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
-  # shellcheck disable=SC2086
-  $DOCKER_COMPOSE up -d db
+  start_postgres
 fi
 
 if [[ "$RESET_USER_DB" == "1" ]]; then

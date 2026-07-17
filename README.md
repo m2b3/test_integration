@@ -112,6 +112,18 @@ The generated `.env` files are intentionally still ignored by Git. Use
 `OVERWRITE_ENV=1 ./setup.sh` to regenerate all of them from the current
 environment variables.
 
+By default, setup installs CPU-only PyTorch before the article search
+dependencies. This avoids pulling large CUDA wheels on ordinary CPU servers.
+If a previous setup failed with `No space left on device` during `torch`
+installation, clear the partial article environment and pip cache before
+rerunning:
+
+```bash
+rm -rf scicomm_embedding/.venv
+python3 -m pip cache purge || true
+OVERWRITE_ENV=1 ./setup.sh
+```
+
 ## Article Pipeline
 
 Run the article pipeline when you need fresh article artifacts:
