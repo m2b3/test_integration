@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+USER_DOCKER_COMPOSE_SET="${DOCKER_COMPOSE+x}"
 
 load_env_file() {
   local path="$1"
@@ -24,12 +25,18 @@ load_env_file() {
 load_env_file "${ROOT_DIR}/.env"
 
 PYTHON="${PYTHON:-python3}"
-DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
-TRY_SUDO_DOCKER="${TRY_SUDO_DOCKER:-1}"
+if [[ -z "$USER_DOCKER_COMPOSE_SET" ]]; then
+  DOCKER_COMPOSE="sudo docker compose"
+else
+  DOCKER_COMPOSE="${DOCKER_COMPOSE:-sudo docker compose}"
+fi
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
 START_DB="${START_DB:-1}"
+KILL_PORTS="${KILL_PORTS:-1}"
 RESET_USER_DB="${RESET_USER_DB:-1}"
 RUN_PIPELINE="${RUN_PIPELINE:-0}"
+INSTALL_ARTICLE_CRON="${INSTALL_ARTICLE_CRON:-1}"
+ARTICLE_CRON_SCHEDULE="${ARTICLE_CRON_SCHEDULE:-0 2 * * *}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 ARTICLE_HOST="${ARTICLE_HOST:-0.0.0.0}"
@@ -82,22 +89,39 @@ install_article_requirements() {
 }
 
 start_postgres() {
-  set +e
   # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
   # shellcheck disable=SC2086
   $DOCKER_COMPOSE up -d db
-  local status=$?
-  set -e
+}
 
-  if [[ "$status" -eq 0 ]]; then
-    return 0
+install_article_cron() {
+  if [[ "$INSTALL_ARTICLE_CRON" != "1" ]]; then
+    echo "==> Skipping nightly article cron. Set INSTALL_ARTICLE_CRON=1 to install it."
+    return
   fi
-  if [[ "$TRY_SUDO_DOCKER" == "1" && "$DOCKER_COMPOSE" != sudo* ]] && command -v sudo >/dev/null 2>&1; then
-    echo "==> Docker Compose failed; retrying with sudo docker compose"
-    sudo docker compose up -d db
-    return 0
+  if ! command -v crontab >/dev/null 2>&1; then
+    echo "==> crontab is not available; skipping nightly article cron." >&2
+    return
   fi
-  return "$status"
+
+  local marker_start="# scicommons nightly article pipeline start"
+  local marker_end="# scicommons nightly article pipeline end"
+  local command="cd $(shell_quote "$ROOT_DIR") && ./scripts/nightly_article_pipeline.sh"
+  local tmp
+  tmp="$(mktemp)"
+
+  (crontab -l 2>/dev/null || true) | awk \
+    -v start="$marker_start" \
+    -v end="$marker_end" \
+    'BEGIN {skip=0} $0 == start {skip=1; next} $0 == end {skip=0; next} skip == 0 {print}' > "$tmp"
+  {
+    echo "$marker_start"
+    echo "${ARTICLE_CRON_SCHEDULE} ${command}"
+    echo "$marker_end"
+  } >> "$tmp"
+  crontab "$tmp"
+  rm -f "$tmp"
+  echo "==> Installed nightly article cron: ${ARTICLE_CRON_SCHEDULE} ${command}"
 }
 
 write_env_file() {
@@ -121,11 +145,13 @@ require_command npm
 
 write_env_file "${ROOT_DIR}/.env" "PYTHON=$(shell_quote "$PYTHON")
 DOCKER_COMPOSE=$(shell_quote "$DOCKER_COMPOSE")
-TRY_SUDO_DOCKER=$(shell_quote "$TRY_SUDO_DOCKER")
 DATABASE_URL=$(shell_quote "$DATABASE_URL")
 START_DB=$(shell_quote "$START_DB")
+KILL_PORTS=$(shell_quote "$KILL_PORTS")
 RESET_USER_DB=$(shell_quote "$RESET_USER_DB")
 RUN_PIPELINE=$(shell_quote "$RUN_PIPELINE")
+INSTALL_ARTICLE_CRON=$(shell_quote "$INSTALL_ARTICLE_CRON")
+ARTICLE_CRON_SCHEDULE=$(shell_quote "$ARTICLE_CRON_SCHEDULE")
 BACKEND_HOST=$(shell_quote "$BACKEND_HOST")
 BACKEND_PORT=$(shell_quote "$BACKEND_PORT")
 ARTICLE_HOST=$(shell_quote "$ARTICLE_HOST")
@@ -203,5 +229,7 @@ if [[ "$RUN_PIPELINE" == "1" ]]; then
 else
   echo "==> Skipping article pipeline. Set RUN_PIPELINE=1 to fetch articles and build search artifacts."
 fi
+
+install_article_cron
 
 echo "Setup complete."

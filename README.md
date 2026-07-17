@@ -90,6 +90,7 @@ Postgres:        localhost:5432
 - runs `npm install` in `frontend`
 - starts Postgres through Docker Compose
 - recreates and seeds the user database
+- installs a user crontab entry that runs the article pipeline nightly at 2 AM
 
 Useful environment overrides:
 
@@ -98,9 +99,10 @@ VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
 NCBI_EMAIL=you@example.com NCBI_API_KEY=optional_key ./setup.sh
 OVERWRITE_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
 OVERWRITE_FRONTEND_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
-DOCKER_COMPOSE="sudo docker compose" ./setup.sh
 RESET_USER_DB=0 ./setup.sh
 RUN_PIPELINE=1 ./setup.sh
+INSTALL_ARTICLE_CRON=0 ./setup.sh
+ARTICLE_CRON_SCHEDULE="0 2 * * *" ./setup.sh
 ```
 
 `RESET_USER_DB=1` is the default and runs `backend/setup_database.py`, which
@@ -160,12 +162,14 @@ SCICOMM_ARTIFACT_DIR=/path/to/artifacts ./run.sh
 
 `run.sh` loads the root `.env` before applying defaults, so changes to ports,
 database URLs, artifact paths, or service URLs can be made there after setup.
+It also frees the configured service ports before starting the services and
+prints any process IDs it stops. Set `KILL_PORTS=0` to disable this behavior.
 
 Useful environment overrides:
 
 ```bash
-DOCKER_COMPOSE="sudo docker compose" ./run.sh
 START_DB=0 ./run.sh
+KILL_PORTS=0 ./run.sh
 BACKEND_PORT=8001 ARTICLE_PORT=8101 FRONTEND_PORT=5174 ./run.sh
 VITE_API_BASE_URL=http://134.87.8.193:8000 ./run.sh
 ```
@@ -189,17 +193,43 @@ If local curl works but external curl hangs, open inbound TCP ports `8000` and
 
 ## Docker Notes
 
-If Docker requires sudo every time, either use:
+The scripts default to `sudo docker compose`, matching the Arbutus server setup.
+If your local Docker user does not need sudo, use:
 
 ```bash
-DOCKER_COMPOSE="sudo docker compose" ./setup.sh
-DOCKER_COMPOSE="sudo docker compose" ./run.sh
+DOCKER_COMPOSE="docker compose" ./setup.sh
+DOCKER_COMPOSE="docker compose" ./run.sh
 ```
 
 or add the user to the Docker group and reconnect:
 
 ```bash
 sudo usermod -aG docker $USER
+```
+
+## Nightly Article Fetch
+
+`setup.sh` installs this user crontab block by default:
+
+```text
+# scicommons nightly article pipeline start
+0 2 * * * cd /path/to/test_integration && ./scripts/nightly_article_pipeline.sh
+# scicommons nightly article pipeline end
+```
+
+The cron job runs `scripts/nightly_article_pipeline.sh`, which loads the
+generated env files, activates `scicomm_embedding/.venv`, and runs
+`python pipeline.py`. Logs go to:
+
+```text
+scicomm_embedding/logs/nightly_pipeline.log
+```
+
+To inspect or remove the cron entry:
+
+```bash
+crontab -l
+crontab -e
 ```
 
 ## Manual Commands

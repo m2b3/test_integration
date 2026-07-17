@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+USER_DOCKER_COMPOSE_SET="${DOCKER_COMPOSE+x}"
 
 load_env_file() {
   local path="$1"
@@ -23,9 +24,13 @@ load_env_file() {
 
 load_env_file "${ROOT_DIR}/.env"
 
-DOCKER_COMPOSE="${DOCKER_COMPOSE:-docker compose}"
-TRY_SUDO_DOCKER="${TRY_SUDO_DOCKER:-1}"
+if [[ -z "$USER_DOCKER_COMPOSE_SET" ]]; then
+  DOCKER_COMPOSE="sudo docker compose"
+else
+  DOCKER_COMPOSE="${DOCKER_COMPOSE:-sudo docker compose}"
+fi
 START_DB="${START_DB:-1}"
+KILL_PORTS="${KILL_PORTS:-1}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
@@ -47,22 +52,62 @@ require_file() {
 }
 
 start_postgres() {
-  set +e
   # DOCKER_COMPOSE may intentionally contain spaces, for example: "sudo docker compose".
   # shellcheck disable=SC2086
   $DOCKER_COMPOSE up -d db
-  local status=$?
-  set -e
+}
 
-  if [[ "$status" -eq 0 ]]; then
-    return 0
+port_pids() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+    return
   fi
-  if [[ "$TRY_SUDO_DOCKER" == "1" && "$DOCKER_COMPOSE" != sudo* ]] && command -v sudo >/dev/null 2>&1; then
-    echo "==> Docker Compose failed; retrying with sudo docker compose"
-    sudo docker compose up -d db
-    return 0
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -n tcp "$port" 2>/dev/null || true
+    return
   fi
-  return "$status"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "sport = :$port" 2>/dev/null \
+      | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' \
+      | sort -u
+  fi
+}
+
+kill_port_processes() {
+  local port="$1"
+  local label="$2"
+  local pids
+  pids="$(port_pids "$port" | tr '\n' ' ' | xargs 2>/dev/null || true)"
+
+  if [[ -z "$pids" ]]; then
+    echo "==> ${label} port ${port} is free"
+    return
+  fi
+
+  echo "==> ${label} port ${port} is in use by PID(s): ${pids}"
+  echo "==> Stopping process(es) on port ${port}"
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  sleep 2
+
+  pids="$(port_pids "$port" | tr '\n' ' ' | xargs 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    echo "==> Force stopping process(es) still on port ${port}: ${pids}"
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+  fi
+}
+
+free_service_ports() {
+  if [[ "$KILL_PORTS" != "1" ]]; then
+    echo "==> Skipping port cleanup. Set KILL_PORTS=1 to enable it."
+    return
+  fi
+
+  kill_port_processes "$ARTICLE_PORT" "Article service"
+  kill_port_processes "$BACKEND_PORT" "Backend"
+  kill_port_processes "$FRONTEND_PORT" "Frontend"
 }
 
 cleanup() {
@@ -82,6 +127,8 @@ trap cleanup EXIT INT TERM
 require_file "${ROOT_DIR}/backend/.venv/bin/activate"
 require_file "${ROOT_DIR}/scicomm_embedding/.venv/bin/activate"
 require_file "${ROOT_DIR}/frontend/node_modules"
+
+free_service_ports
 
 if [[ "$START_DB" == "1" ]]; then
   echo "==> Starting Postgres"
@@ -121,7 +168,7 @@ echo "==> Starting frontend on ${FRONTEND_HOST}:${FRONTEND_PORT}"
 (
   cd "${ROOT_DIR}/frontend"
   export VITE_API_BASE_URL
-  exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT"
+  exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
 ) &
 PIDS+=("$!")
 
