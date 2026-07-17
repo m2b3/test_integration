@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "igather2"
+version = "0.1.0"
+description = "PubMed 24-hour ingestion tool for Scicommons"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "biopython==1.86",
+]
+
+[project.scripts]
+igather2-pubmed = "base:main"
+
+[tool.setuptools]
+py-modules = ["base"]
