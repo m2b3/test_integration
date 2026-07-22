@@ -124,7 +124,7 @@ def build_source_registry() -> dict[str, SourceConfig]:
             name="arxiv",
             script_name="arxiv.py",
             database_name="arxiv.sqlite",
-            command_args=("--db", "arxiv.sqlite"),
+            command_args=("--db", "arxiv.sqlite", "--max-retries", "6"),
             expected_tables=("arxiv_articles",),
         ),
         "pubmed": SourceConfig(

@@ -22,6 +22,18 @@ load_env_file() {
   done < "$path"
 }
 
+load_env_file_override() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    return
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$path"
+  set +a
+}
+
 load_env_file "${ROOT_DIR}/.env"
 
 if [[ -z "$USER_DOCKER_COMPOSE_SET" ]]; then
@@ -167,7 +179,9 @@ PIDS+=("$!")
 echo "==> Starting frontend on ${FRONTEND_HOST}:${FRONTEND_PORT}"
 (
   cd "${ROOT_DIR}/frontend"
+  load_env_file_override "${ROOT_DIR}/frontend/.env"
   export VITE_API_BASE_URL
+  echo "==> Frontend API base URL: ${VITE_API_BASE_URL}"
   exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
 ) &
 PIDS+=("$!")
