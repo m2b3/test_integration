@@ -171,11 +171,69 @@ def article_service_params(
 
 
 def clean_unique_strings(values: list[str]) -> list[str]:
-    return [
-        value
-        for value in dict.fromkeys(value.strip() for value in values)
-        if value
-    ]
+    unique_values: list[str] = []
+    seen_values: set[str] = set()
+    for raw_value in values:
+        value = re.sub(r"\s+", " ", raw_value.strip())
+        value_key = value.lower()
+        if value and value_key not in seen_values:
+            unique_values.append(value)
+            seen_values.add(value_key)
+    return unique_values
+
+
+def resolve_user_tags(cur: psycopg.Cursor, tags: list[str]) -> tuple[list[str], list[str]]:
+    unique_tags = clean_unique_strings(tags)
+    if not unique_tags:
+        return [], []
+
+    lookup_keys = [tag.lower() for tag in unique_tags]
+    placeholders = ", ".join(["%s"] * len(lookup_keys))
+    cur.execute(
+        f"""
+        SELECT id, name
+        FROM tags
+        WHERE lower(id) IN ({placeholders})
+           OR lower(name) IN ({placeholders})
+        """,
+        [*lookup_keys, *lookup_keys],
+    )
+
+    existing_tags: dict[str, dict] = {}
+    for row in cur.fetchall():
+        existing_tags[row["id"].lower()] = row
+        existing_tags[row["name"].lower()] = row
+
+    tag_ids: list[str] = []
+    tag_names: list[str] = []
+    new_tag_rows: list[tuple[str, str]] = []
+    seen_tag_ids: set[str] = set()
+
+    for tag in unique_tags:
+        existing_tag = existing_tags.get(tag.lower())
+        tag_id = existing_tag["id"] if existing_tag else tag
+        tag_name = existing_tag["name"] if existing_tag else tag
+
+        if tag_id in seen_tag_ids:
+            continue
+
+        tag_ids.append(tag_id)
+        tag_names.append(tag_name)
+        seen_tag_ids.add(tag_id)
+        if existing_tag is None:
+            new_tag_rows.append((tag_id, tag_name))
+
+    if new_tag_rows:
+        cur.executemany(
+            """
+            INSERT INTO tags (id, name)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            new_tag_rows,
+        )
+
+    return tag_ids, tag_names
 
 
 def clean_login_values(payload: LoginRequest) -> tuple[str, str]:
@@ -285,14 +343,15 @@ def get_profile(cur: psycopg.Cursor, user_id: str) -> dict:
 
     cur.execute(
         """
-        SELECT tag_id
-        FROM user_tags
-        WHERE user_id = %s
-        ORDER BY tag_id ASC
+        SELECT t.name
+        FROM user_tags ut
+        JOIN tags t ON t.id = ut.tag_id
+        WHERE ut.user_id = %s
+        ORDER BY t.name ASC
         """,
         [user_id],
     )
-    tags = [row["tag_id"] for row in cur.fetchall()]
+    tags = [row["name"] for row in cur.fetchall()]
 
     cur.execute(
         """
@@ -417,28 +476,18 @@ def ensure_user_daily_feed(
 
 
 def replace_user_tags(cur: psycopg.Cursor, user_id: str, tags: list[str]) -> list[str]:
-    unique_tags = clean_unique_strings(tags)
-
-    if unique_tags:
-        cur.executemany(
-            """
-            INSERT INTO tags (id, name)
-            VALUES (%s, %s)
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
-            """,
-            [(tag, tag) for tag in unique_tags],
-        )
+    tag_ids, tag_names = resolve_user_tags(cur, tags)
 
     cur.execute("DELETE FROM user_tags WHERE user_id = %s", [user_id])
-    if unique_tags:
+    if tag_ids:
         cur.executemany(
             """
             INSERT INTO user_tags (user_id, tag_id)
             VALUES (%s, %s)
             """,
-            [(user_id, tag_id) for tag_id in unique_tags],
+            [(user_id, tag_id) for tag_id in tag_ids],
         )
-    return unique_tags
+    return tag_names
 
 
 def replace_user_authors(cur: psycopg.Cursor, user_id: str, authors: list[str]) -> list[str]:
