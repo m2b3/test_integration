@@ -1,24 +1,20 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import AuthorInput, { normalizeAuthors } from './AuthorInput'
 import InterestInput from './InterestInput'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function authorsToText(authors) {
-  if (Array.isArray(authors)) {
-    return authors.join(', ')
-  }
-  return authors || ''
-}
 
 function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
   const [step, setStep] = useState('account')
   const [username, setUsername] = useState(initialProfile?.username || '')
   const [email, setEmail] = useState(initialProfile?.email || '')
   const [tags, setTags] = useState(initialProfile?.tags || [])
-  const [authors, setAuthors] = useState(() => authorsToText(initialProfile?.authors))
+  const [authors, setAuthors] = useState(() => normalizeAuthors(initialProfile?.authors))
   const [createdProfile, setCreatedProfile] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const interestInputRef = useRef(null)
+  const authorInputRef = useRef(null)
 
   function validateAccountFields() {
     if (!username.trim()) {
@@ -50,7 +46,7 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
       if (createAccount) {
         setCreatedProfile(profile)
         setTags(profile.tags || [])
-        setAuthors(authorsToText(profile.authors))
+        setAuthors(normalizeAuthors(profile.authors))
         setStep('interests')
       }
     } catch (error) {
@@ -67,10 +63,12 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
 
   function handleInterestSubmit(event) {
     event.preventDefault()
+    const nextTags = interestInputRef.current?.commitPending() || tags
+    const nextAuthors = authorInputRef.current?.commitPending() || authors
     onSaveInterests({
       ...createdProfile,
-      tags,
-      authors: authors.trim(),
+      tags: nextTags,
+      authors: nextAuthors,
     })
   }
 
@@ -131,17 +129,8 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
           </form>
         ) : (
           <form onSubmit={handleInterestSubmit}>
-            <InterestInput interests={tags} onChange={setTags} />
-
-            <label className="field optional-field">
-              <span>Authors to follow optional</span>
-              <input
-                onChange={(event) => setAuthors(event.target.value)}
-                placeholder="Author names separated by commas"
-                type="text"
-                value={authors}
-              />
-            </label>
+            <InterestInput ref={interestInputRef} interests={tags} onChange={setTags} />
+            <AuthorInput ref={authorInputRef} authors={authors} onChange={setAuthors} />
 
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={() => setStep('account')}>

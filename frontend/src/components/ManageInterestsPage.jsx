@@ -1,23 +1,21 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import AuthorInput, { normalizeAuthors } from './AuthorInput'
 import InterestInput from './InterestInput'
-
-function authorsToText(authors) {
-  if (Array.isArray(authors)) {
-    return authors.join(', ')
-  }
-  return authors || ''
-}
 
 function ManageInterestsPage({ onBack, onSave, profile }) {
   const [tags, setTags] = useState(profile?.tags || [])
-  const [authors, setAuthors] = useState(() => authorsToText(profile?.authors))
+  const [authors, setAuthors] = useState(() => normalizeAuthors(profile?.authors))
+  const interestInputRef = useRef(null)
+  const authorInputRef = useRef(null)
 
   function handleSubmit(event) {
     event.preventDefault()
+    const nextTags = interestInputRef.current?.commitPending() || tags
+    const nextAuthors = authorInputRef.current?.commitPending() || authors
     onSave({
       ...profile,
-      tags,
-      authors: authors.trim(),
+      tags: nextTags,
+      authors: nextAuthors,
     })
   }
 
@@ -32,17 +30,8 @@ function ManageInterestsPage({ onBack, onSave, profile }) {
       </div>
 
       <form className="interests-form" onSubmit={handleSubmit}>
-        <InterestInput interests={tags} onChange={setTags} />
-
-        <label className="field optional-field">
-          <span>Authors to follow optional</span>
-          <input
-            onChange={(event) => setAuthors(event.target.value)}
-            placeholder="Author names separated by commas"
-            type="text"
-            value={authors}
-          />
-        </label>
+        <InterestInput ref={interestInputRef} interests={tags} onChange={setTags} />
+        <AuthorInput ref={authorInputRef} authors={authors} onChange={setAuthors} />
 
         <div className="modal-actions">
           <button className="primary-button" type="submit">

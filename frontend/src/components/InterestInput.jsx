@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { forwardRef, useImperativeHandle, useMemo, useState } from 'react'
 
 const SUGGESTED_INTERESTS = [
   'biology',
@@ -45,7 +45,7 @@ function suggestionRank(suggestion, input) {
   return null
 }
 
-function InterestInput({ interests, onChange }) {
+const InterestInput = forwardRef(function InterestInput({ interests, onChange }, ref) {
   const [inputValue, setInputValue] = useState('')
 
   const suggestions = useMemo(() => {
@@ -54,31 +54,41 @@ function InterestInput({ interests, onChange }) {
       return []
     }
 
-    return SUGGESTED_INTERESTS
+    const exactMatch = interests.some((interest) => interest.toLowerCase() === value.toLowerCase())
+    const matchingSuggestions = SUGGESTED_INTERESTS
       .filter((suggestion) => !interests.some((interest) => interest.toLowerCase() === suggestion.toLowerCase()))
       .map((suggestion) => ({
+        isCustom: false,
         suggestion,
         rank: suggestionRank(suggestion, value),
       }))
       .filter((item) => item.rank !== null)
       .sort((a, b) => a.rank - b.rank || a.suggestion.localeCompare(b.suggestion))
       .slice(0, 6)
-      .map((item) => item.suggestion)
+
+    if (!exactMatch && !matchingSuggestions.some((item) => item.suggestion.toLowerCase() === value.toLowerCase())) {
+      return [{ isCustom: true, suggestion: value, rank: 0 }, ...matchingSuggestions]
+    }
+
+    return matchingSuggestions
   }, [inputValue, interests])
 
   function addInterest(value) {
     const nextInterest = normalized(value)
     if (!nextInterest) {
-      return
+      return interests
     }
 
     const alreadyExists = interests.some(
       (interest) => interest.toLowerCase() === nextInterest.toLowerCase(),
     )
+    let nextInterests = interests
     if (!alreadyExists) {
-      onChange([...interests, nextInterest])
+      nextInterests = [...interests, nextInterest]
+      onChange(nextInterests)
     }
     setInputValue('')
+    return nextInterests
   }
 
   function removeInterest(value) {
@@ -91,6 +101,10 @@ function InterestInput({ interests, onChange }) {
       addInterest(inputValue)
     }
   }
+
+  useImperativeHandle(ref, () => ({
+    commitPending: () => addInterest(inputValue),
+  }))
 
   return (
     <div className="interest-input">
@@ -107,9 +121,9 @@ function InterestInput({ interests, onChange }) {
 
       {suggestions.length > 0 && (
         <div className="interest-suggestions">
-          {suggestions.map((suggestion) => (
-            <button key={suggestion} type="button" onClick={() => addInterest(suggestion)}>
-              {suggestion}
+          {suggestions.map(({ suggestion, isCustom }) => (
+            <button key={`${isCustom ? 'custom' : 'suggestion'}-${suggestion}`} type="button" onClick={() => addInterest(suggestion)}>
+              {isCustom ? `Add "${suggestion}"` : suggestion}
             </button>
           ))}
         </div>
@@ -127,6 +141,6 @@ function InterestInput({ interests, onChange }) {
       </div>
     </div>
   )
-}
+})
 
 export default InterestInput

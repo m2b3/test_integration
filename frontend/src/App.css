@@ -745,6 +745,24 @@ select:focus {
   color: var(--text-strong);
 }
 
+.author-input {
+  margin-top: 16px;
+}
+
+.author-chip {
+  background: #f5eff9;
+  border-color: #ddcce8;
+  color: #5a3b6f;
+}
+
+.author-chip button {
+  border-color: #ddcce8;
+}
+
+.author-chip button:hover {
+  border-color: #7d5594;
+}
+
 .profile-tags {
   display: flex;
   flex-wrap: wrap;
