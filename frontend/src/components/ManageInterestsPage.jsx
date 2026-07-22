@@ -5,18 +5,28 @@ import InterestInput from './InterestInput'
 function ManageInterestsPage({ onBack, onSave, profile }) {
   const [tags, setTags] = useState(profile?.tags || [])
   const [authors, setAuthors] = useState(() => normalizeAuthors(profile?.authors))
+  const [errorMessage, setErrorMessage] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
   const interestInputRef = useRef(null)
   const authorInputRef = useRef(null)
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault()
     const nextTags = interestInputRef.current?.commitPending() || tags
     const nextAuthors = authorInputRef.current?.commitPending() || authors
-    onSave({
-      ...profile,
-      tags: nextTags,
-      authors: nextAuthors,
-    })
+    setErrorMessage('')
+    setIsSaving(true)
+    try {
+      await onSave({
+        ...profile,
+        tags: nextTags,
+        authors: nextAuthors,
+      })
+    } catch (error) {
+      setErrorMessage(error.message || 'Could not save interests.')
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -33,9 +43,11 @@ function ManageInterestsPage({ onBack, onSave, profile }) {
         <InterestInput ref={interestInputRef} interests={tags} onChange={setTags} />
         <AuthorInput ref={authorInputRef} authors={authors} onChange={setAuthors} />
 
+        {errorMessage && <p className="form-error">{errorMessage}</p>}
+
         <div className="modal-actions">
-          <button className="primary-button" type="submit">
-            Save interests
+          <button className="primary-button" disabled={isSaving} type="submit">
+            {isSaving ? 'Saving interests' : 'Save interests'}
           </button>
         </div>
       </form>

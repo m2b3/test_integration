@@ -61,15 +61,23 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
     submitAccount(false)
   }
 
-  function handleInterestSubmit(event) {
+  async function handleInterestSubmit(event) {
     event.preventDefault()
     const nextTags = interestInputRef.current?.commitPending() || tags
     const nextAuthors = authorInputRef.current?.commitPending() || authors
-    onSaveInterests({
-      ...createdProfile,
-      tags: nextTags,
-      authors: nextAuthors,
-    })
+    setErrorMessage('')
+    setIsSubmitting(true)
+    try {
+      await onSaveInterests({
+        ...createdProfile,
+        tags: nextTags,
+        authors: nextAuthors,
+      })
+    } catch (error) {
+      setErrorMessage(error.message || 'Could not save interests.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -132,12 +140,14 @@ function ProfileModal({ initialProfile, onClose, onLogin, onSaveInterests }) {
             <InterestInput ref={interestInputRef} interests={tags} onChange={setTags} />
             <AuthorInput ref={authorInputRef} authors={authors} onChange={setAuthors} />
 
+            {errorMessage && <p className="form-error">{errorMessage}</p>}
+
             <div className="modal-actions">
               <button className="secondary-button" type="button" onClick={() => setStep('account')}>
                 Back
               </button>
-              <button className="primary-button" type="submit">
-                Save interests
+              <button className="primary-button" disabled={isSubmitting} type="submit">
+                {isSubmitting ? 'Saving interests' : 'Save interests'}
               </button>
             </div>
           </form>

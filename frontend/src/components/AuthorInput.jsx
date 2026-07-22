@@ -51,7 +51,6 @@ const AuthorInput = forwardRef(function AuthorInput({ authors, onChange }, ref) 
       <label className="field optional-field">
         <span>Authors to follow optional</span>
         <input
-          onBlur={() => addAuthors(inputValue)}
           onChange={(event) => setInputValue(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type an author and press Enter"
