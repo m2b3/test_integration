@@ -13,14 +13,21 @@ from urllib.request import Request as UrlRequest
 from urllib.request import urlopen
 
 import psycopg
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.rows import dict_row
 from pydantic import BaseModel
 
 
 DEFAULT_DATABASE_URL = "postgresql://scicommons:scicommons@localhost:5432/scicommons"
-DEFAULT_ARTICLE_SERVICE_BASE_URL = "http://localhost:8100"
+DEFAULT_ARTICLE_SERVICE_BASE_URL = "http://134.87.9.167:8100"
+DEFAULT_CORS_ORIGINS = (
+    "http://134.87.8.193:5173",
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+)
 MatchMode = Literal["and", "or"]
 SESSION_COOKIE_NAME = "scicommons_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
@@ -29,20 +36,18 @@ USER_DAILY_FEED_SIZE = 500
 ARTICLE_SERVICE_PAGE_SIZE = 200
 
 
+def parse_csv_env(name: str, default_values: tuple[str, ...]) -> list[str]:
+    raw_value = os.getenv(name, "").strip()
+    if not raw_value:
+        return list(default_values)
+    return [value.strip() for value in raw_value.split(",") if value.strip()]
+
+
 app = FastAPI(title="Scicommons Prototype API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://134.87.8.193",
-        "http://134.87.8.193:5173",
-        "http://192.168.167.59",
-        "http://192.168.167.59:5173",
-    ],
+    allow_origins=parse_csv_env("CORS_ORIGINS", DEFAULT_CORS_ORIGINS),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -78,6 +83,12 @@ class RecentlyViewedRequest(BaseModel):
     published_date: str | None = None
     abstract: str = ""
     tags: list[str] = []
+
+
+class FeedRefreshRequest(BaseModel):
+    feed_date: date | None = None
+    user_ids: list[str] | None = None
+    force: bool = True
 
 
 def database_url() -> str:
@@ -317,6 +328,19 @@ def require_user_session(request: Request, cur: psycopg.Cursor, user_id: str) ->
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another user")
 
 
+def require_internal_request(
+    x_internal_token: Annotated[str | None, Header(alias="X-Internal-Token")] = None,
+) -> None:
+    expected_token = os.getenv("INTERNAL_API_TOKEN", "").strip()
+    if not expected_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Internal feed refresh is not configured.",
+        )
+    if not x_internal_token or not secrets.compare_digest(x_internal_token, expected_token):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
+
+
 def normalize_recently_viewed(row: dict) -> dict:
     return {
         "id": row["article_key"],
@@ -377,6 +401,28 @@ def user_recommendation_query(cur: psycopg.Cursor, user_id: str) -> str:
     profile = get_profile(cur, user_id)
     values = [*profile["tags"], *profile["authors"]]
     return " ".join(clean_unique_strings(values))
+
+
+def feed_refresh_user_ids(cur: psycopg.Cursor, requested_user_ids: list[str] | None) -> list[str]:
+    if not requested_user_ids:
+        cur.execute("SELECT id FROM users ORDER BY created_at ASC, id ASC")
+        return [row["id"] for row in cur.fetchall()]
+
+    unique_ids = clean_unique_strings(requested_user_ids)
+    if not unique_ids:
+        return []
+
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    cur.execute(
+        f"""
+        SELECT id
+        FROM users
+        WHERE id IN ({placeholders})
+        ORDER BY created_at ASC, id ASC
+        """,
+        unique_ids,
+    )
+    return [row["id"] for row in cur.fetchall()]
 
 
 def article_key(article: dict) -> str:
@@ -475,6 +521,36 @@ def ensure_user_daily_feed(
     return store_daily_feed_keys(cur, user_id, feed_date, generated_keys)
 
 
+def refresh_daily_feeds(
+    cur: psycopg.Cursor,
+    *,
+    feed_date: date,
+    user_ids: list[str] | None,
+    force: bool,
+) -> list[dict]:
+    cleanup_expired_user_daily_feeds(cur, feed_date)
+    refreshed: list[dict] = []
+
+    for user_id in feed_refresh_user_ids(cur, user_ids):
+        recommendation_query = user_recommendation_query(cur, user_id)
+        if force:
+            cur.execute(
+                "DELETE FROM user_daily_feed WHERE user_id = %s AND feed_date = %s",
+                [user_id, feed_date],
+            )
+        keys = ensure_user_daily_feed(cur, user_id, recommendation_query, feed_date)
+        refreshed.append(
+            {
+                "user_id": user_id,
+                "feed_date": feed_date.isoformat(),
+                "article_count": len(keys),
+                "has_interests": bool(recommendation_query),
+            }
+        )
+
+    return refreshed
+
+
 def replace_user_tags(cur: psycopg.Cursor, user_id: str, tags: list[str]) -> list[str]:
     tag_ids, tag_names = resolve_user_tags(cur, tags)
 
@@ -533,6 +609,28 @@ def get_tags(conn: Annotated[psycopg.Connection, Depends(get_db)]) -> list[dict]
 @app.get("/sources")
 def get_sources() -> list[str]:
     return article_service_get("/sources", {})  # type: ignore[return-value]
+
+
+@app.post("/internal/feed-refresh")
+def refresh_user_feeds(
+    payload: FeedRefreshRequest,
+    _authorized: Annotated[None, Depends(require_internal_request)],
+    conn: Annotated[psycopg.Connection, Depends(get_db)],
+) -> dict:
+    feed_date = payload.feed_date or date.today()
+    with conn.cursor() as cur:
+        refreshed = refresh_daily_feeds(
+            cur,
+            feed_date=feed_date,
+            user_ids=payload.user_ids,
+            force=payload.force,
+        )
+    return {
+        "status": "ok",
+        "feed_date": feed_date.isoformat(),
+        "users_refreshed": len(refreshed),
+        "feeds": refreshed,
+    }
 
 
 @app.get("/articles")

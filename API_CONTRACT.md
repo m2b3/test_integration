@@ -19,13 +19,14 @@ POST /login
 GET  /me
 POST /logout
 PUT  /users/{user_id}/tags
+POST /internal/feed-refresh
 ```
 
 Article endpoints are implemented by proxying to the article/search API from
 the `scicomm_embedding` repo. Configure the backend with:
 
 ```text
-ARTICLE_SERVICE_BASE_URL=http://localhost:8100
+ARTICLE_SERVICE_BASE_URL=http://134.87.9.167:8100
 ```
 
 `POST /login` creates a backend session in `user_sessions` and sets an HTTP-only
@@ -88,6 +89,28 @@ keys from the user's saved interests/authors, stores up to the configured feed
 size, then searches/filters within those stored keys. When interests/authors
 change, the cached feed for that user is invalidated and regenerated on the
 next Recommended request.
+
+The GPU server should call the backend after `pipeline.py` finishes and the
+article service has fresh artifacts:
+
+```text
+POST /internal/feed-refresh
+X-Internal-Token: <INTERNAL_API_TOKEN>
+```
+
+Request body:
+
+```json
+{
+  "feed_date": "2026-07-23",
+  "user_ids": ["user-1"],
+  "force": true
+}
+```
+
+All body fields are optional. With `force=true`, existing rows for that feed
+date are replaced from the current user interests/authors and the current GPU
+article index.
 
 All Feed does not require login:
 

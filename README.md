@@ -1,185 +1,133 @@
-# Scicommons Integration Prototype
+# Scicommons Backend
 
-Monorepo prototype for the Scicommons web app.
+Backend branch for the Scicommons app.
 
 Current deployment shape:
 
 ```text
-React frontend -> FastAPI backend -> Postgres user database
-                         |
-                         v
-              Article/search service -> SQLite + FAISS article artifacts
+React frontend       -> http://134.87.8.193:5173
+FastAPI backend      -> this repo/server, port 8000
+Postgres user DB     -> this repo/server, port 5432
+GPU article service  -> http://134.87.9.167:8100
 ```
 
-For the prototype, all services can run on one Arbutus server.
+The backend owns user/session/profile state in Postgres. The GPU server owns
+article fetching, embedding, FAISS, SQLite article artifacts, and the
+article/search API. The backend talks to the GPU article service through
+`ARTICLE_SERVICE_BASE_URL`.
 
 ## Repository Layout
 
 ```text
 backend/             FastAPI user/session/profile API and article-service proxy
-frontend/            React/Vite frontend
-scicomm_embedding/   Article fetching, indexing, semantic/keyword search API
-igather2/            PubMed ingestion support and bundled EDirect tools
 docker-compose.yml   Local Postgres user database
-setup.sh             Install dependencies and initialize local configuration
-run.sh               Run Postgres, article service, backend, and frontend
+setup.sh             Install backend dependencies and initialize backend env
+run.sh               Run Postgres and the backend API
 ```
 
 The article database is intentionally separate from the user database. User
-state lives in Postgres. Article records and search indexes live in
-`scicomm_embedding` artifacts such as `all.sqlite`, `all_specter.index`,
-`all_metadata.json`, and `all_manifest.json`.
-
-## Server Setup
-
-SSH to the Arbutus server at `134.87.8.193`.
-
-Clone the repo:
-
-```bash
-git clone git@github.com:m2b3/test_integration.git
-cd test_integration
-```
-
-If GitHub SSH is not set up on the server, add a server SSH key to GitHub first.
+state lives in Postgres. Article records and search indexes live on the GPU
+server.
 
 ## Quick Start
 
-Run setup from the repo root:
+From the repo root:
 
 ```bash
 ./setup.sh
-```
-
-On the Arbutus server, set the browser-facing backend URL before setup so the
-frontend `.env` points at the reachable backend:
-
-```bash
-VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
-```
-
-Then run everything:
-
-```bash
 ./run.sh
 ```
 
-Open:
+Defaults:
 
 ```text
-http://134.87.8.193:5173
+Backend:             http://localhost:8000
+Frontend origin:     http://134.87.8.193:5173
+GPU article service: http://134.87.9.167:8100
+Postgres:            localhost:5432
 ```
 
-Local defaults:
-
-```text
-Frontend:        http://localhost:5173
-Backend:         http://localhost:8000
-Article service: http://localhost:8100
-Postgres:        localhost:5432
-```
-
-## Setup Script
-
-`setup.sh` does the following:
-
-- creates local `.env` files for the root scripts, backend, frontend,
-  `scicomm_embedding`, and `igather2`
-- creates Python virtual environments for `backend`, `scicomm_embedding`, and `igather2`
-- installs backend, article pipeline/search, and PubMed ingestion dependencies
-- runs `npm install` in `frontend`
-- starts Postgres through Docker Compose
-- recreates and seeds the user database
-- installs a user crontab entry that runs the article pipeline nightly at 2 AM
-
-Useful environment overrides:
+For first-time prototype setup, `RESET_USER_DB=1` is the default and runs
+`backend/setup_database.py`, which drops and recreates the user-side tables.
+For a deployed database with real users, use:
 
 ```bash
-VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
-NCBI_EMAIL=you@example.com NCBI_API_KEY=optional_key ./setup.sh
-OVERWRITE_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
-OVERWRITE_FRONTEND_ENV=1 VITE_API_BASE_URL=http://134.87.8.193:8000 ./setup.sh
 RESET_USER_DB=0 ./setup.sh
-RUN_PIPELINE=1 ./setup.sh
-INSTALL_ARTICLE_CRON=0 ./setup.sh
-ARTICLE_CRON_SCHEDULE="0 2 * * *" ./setup.sh
 ```
 
-`RESET_USER_DB=1` is the default and runs `backend/setup_database.py`, which
-drops and recreates the prototype user-side tables. `RUN_PIPELINE=0` is the
-default because the article pipeline performs network fetching and embedding
-work.
+## Environment
 
-The generated `.env` files are intentionally still ignored by Git. Use
-`OVERWRITE_ENV=1 ./setup.sh` to regenerate all of them from the current
-environment variables.
-
-By default, setup installs CPU-only PyTorch before the article search
-dependencies. This avoids pulling large CUDA wheels on ordinary CPU servers.
-If a previous setup failed with `No space left on device` during `torch`
-installation, clear the partial article environment and pip cache before
-rerunning:
+`setup.sh` writes `.env` and `backend/.env`. Useful overrides:
 
 ```bash
-rm -rf scicomm_embedding/.venv
-python3 -m pip cache purge || true
+ARTICLE_SERVICE_BASE_URL=http://134.87.9.167:8100 ./setup.sh
+CORS_ORIGINS=http://134.87.8.193:5173 ./setup.sh
+SESSION_COOKIE_SECURE=true ./setup.sh
+RESET_USER_DB=0 ./setup.sh
 OVERWRITE_ENV=1 ./setup.sh
 ```
 
-## Article Pipeline
-
-Run the article pipeline when you need fresh article artifacts:
-
-```bash
-cd scicomm_embedding
-source .venv/bin/activate
-python pipeline.py
-```
-
-The article service expects these artifacts in `scicomm_embedding/` by default:
+Important variables:
 
 ```text
-all.sqlite
-all_specter.index
-all_metadata.json
-all_manifest.json
+DATABASE_URL               Postgres connection string
+ARTICLE_SERVICE_BASE_URL   GPU article/search API base URL
+CORS_ORIGINS               Comma-separated browser origins allowed by backend
+SESSION_COOKIE_SECURE      Set true when serving backend over HTTPS
+INTERNAL_API_TOKEN         Shared secret for internal feed refresh endpoint
 ```
 
-If artifacts live elsewhere, point `run.sh` at them:
+If `INTERNAL_API_TOKEN` is not provided, `setup.sh` generates one and writes it
+to `.env` and `backend/.env`.
+
+## Daily Feed Refresh
+
+The backend stores per-user daily feeds in `user_daily_feed` as ranked
+`article_key` rows. After the GPU server finishes `pipeline.py` and the article
+service has the fresh artifacts, it should call the backend refresh endpoint:
 
 ```bash
-SCICOMM_ARTIFACT_DIR=/path/to/artifacts ./run.sh
+curl -X POST http://134.87.8.193:8000/internal/feed-refresh \
+  -H "Content-Type: application/json" \
+  -H "X-Internal-Token: ${INTERNAL_API_TOKEN}" \
+  -d '{"force": true}'
 ```
+
+Optional body fields:
+
+```json
+{
+  "feed_date": "2026-07-23",
+  "user_ids": ["user-1", "user-2"],
+  "force": true
+}
+```
+
+If a user changes interests or authors, the backend invalidates that user's
+cached feed and regenerates it on the next `GET /users/{user_id}/feed` request.
 
 ## Run Script
 
 `run.sh` starts:
 
-- Postgres via Docker Compose
-- article/search API on port `8100`
-- backend API on port `8000`
-- frontend dev server on port `5173`
+- Postgres through Docker Compose, unless `START_DB=0`
+- FastAPI backend on port `8000`
 
-`run.sh` loads the root `.env` before applying defaults, so changes to ports,
-database URLs, artifact paths, or service URLs can be made there after setup.
-It also frees the configured service ports before starting the services and
-prints any process IDs it stops. Set `KILL_PORTS=0` to disable this behavior.
-
-Useful environment overrides:
+Useful overrides:
 
 ```bash
 START_DB=0 ./run.sh
 KILL_PORTS=0 ./run.sh
-BACKEND_PORT=8001 ARTICLE_PORT=8101 FRONTEND_PORT=5174 ./run.sh
-VITE_API_BASE_URL=http://134.87.8.193:8000 ./run.sh
+BACKEND_PORT=8001 ./run.sh
+ARTICLE_SERVICE_BASE_URL=http://134.87.9.167:8100 ./run.sh
 ```
 
-Verify from the server:
+Verify from the backend server:
 
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/tags
-curl http://localhost:8100/health
+curl http://localhost:8000/sources
 ```
 
 Verify externally:
@@ -188,150 +136,15 @@ Verify externally:
 curl http://134.87.8.193:8000/health
 ```
 
-If local curl works but external curl hangs, open inbound TCP ports `8000` and
-`5173` in the Arbutus security/firewall settings.
+If local curl works but external curl hangs, open inbound TCP port `8000` in
+the Arbutus security/firewall settings.
 
 ## Docker Notes
 
 The scripts default to `sudo docker compose`, matching the Arbutus server setup.
-If your local Docker user does not need sudo, use:
+If your Docker user does not need sudo, use:
 
 ```bash
 DOCKER_COMPOSE="docker compose" ./setup.sh
 DOCKER_COMPOSE="docker compose" ./run.sh
 ```
-
-or add the user to the Docker group and reconnect:
-
-```bash
-sudo usermod -aG docker $USER
-```
-
-## Nightly Article Fetch
-
-`setup.sh` installs this user crontab block by default:
-
-```text
-# scicommons nightly article pipeline start
-0 2 * * * cd /path/to/test_integration && ./scripts/nightly_article_pipeline.sh
-# scicommons nightly article pipeline end
-```
-
-The cron job runs `scripts/nightly_article_pipeline.sh`, which loads the
-generated env files, activates `scicomm_embedding/.venv`, and runs
-`python pipeline.py`. Logs go to:
-
-```text
-scicomm_embedding/logs/nightly_pipeline.log
-```
-
-To inspect or remove the cron entry:
-
-```bash
-crontab -l
-crontab -e
-```
-
-## Manual Commands
-
-Backend:
-
-```bash
-cd backend
-source .venv/bin/activate
-DATABASE_URL=postgresql://scicommons:scicommons@localhost:5432/scicommons \
-ARTICLE_SERVICE_BASE_URL=http://localhost:8100 \
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Article service:
-
-```bash
-cd scicomm_embedding
-source .venv/bin/activate
-uvicorn article_service.main:app --host 0.0.0.0 --port 8100
-```
-
-Frontend:
-
-```bash
-cd frontend
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-## Running With tmux
-
-Use tmux if you want services to keep running after logout:
-
-```bash
-tmux new -s scicommons
-./run.sh
-```
-
-Detach from tmux:
-
-```text
-Ctrl+b, then d
-```
-
-Reconnect later:
-
-```bash
-tmux attach -t scicommons
-```
-
-Useful tmux commands:
-
-```bash
-tmux ls
-tmux kill-session -t scicommons
-```
-
-## Main API Endpoints
-
-```text
-GET  /health
-GET  /tags
-GET  /sources
-GET  /articles
-GET  /articles?semantic_query=biology&source=arxiv
-GET  /users/{user_id}/feed
-GET  /users/{user_id}/profile
-PUT  /users/{user_id}/profile
-GET  /users/{user_id}/tags
-GET  /users/{user_id}/recently-viewed
-POST /users/{user_id}/recently-viewed
-POST /login
-GET  /me
-POST /logout
-PUT  /users/{user_id}/tags
-```
-
-## Git Notes
-
-`scicomm_embedding` and `igather2` were imported with non-squashed Git subtree
-merges, so their histories are reachable from this repository's history.
-
-For future work in the old standalone repositories, do not force-push over a
-partner's branch. Have collaborators commit or stash local work before pulling
-updates:
-
-```bash
-git status
-git stash push -u -m "work before monorepo sync"
-git pull
-git stash pop
-```
-
-Committed work in the old repositories can still be brought into this monorepo
-with `git subtree pull` for the appropriate prefix.
-
-## Notes
-
-- Backend runs on port `8000`.
-- Article/search service runs on port `8100` by default.
-- Frontend dev server runs on port `5173`.
-- Postgres runs on local port `5432`.
-- User login/session/profile/interests/recently viewed are stored through the backend and Postgres. The browser also keeps a non-authoritative cache of the last profile and source filter so refreshes feel remembered; `/me` verifies the session and refreshes profile data from the DB.
-- Article listing/search is proxied through `ARTICLE_SERVICE_BASE_URL`; Postgres is not the source of article records.
-- Frontend, user backend, Postgres, and article/search service can run together for now; they can be split across servers once deployment requirements are clearer.

@@ -35,24 +35,24 @@ load_env_file_override() {
 }
 
 load_env_file "${ROOT_DIR}/.env"
+load_env_file_override "${ROOT_DIR}/backend/.env"
 
 if [[ -z "$USER_DOCKER_COMPOSE_SET" ]]; then
   DOCKER_COMPOSE="sudo docker compose"
 else
   DOCKER_COMPOSE="${DOCKER_COMPOSE:-sudo docker compose}"
 fi
+
 START_DB="${START_DB:-1}"
 KILL_PORTS="${KILL_PORTS:-1}"
 DATABASE_URL="${DATABASE_URL:-postgresql://scicommons:scicommons@localhost:5432/scicommons}"
 BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
 BACKEND_PORT="${BACKEND_PORT:-8000}"
-ARTICLE_HOST="${ARTICLE_HOST:-0.0.0.0}"
-ARTICLE_PORT="${ARTICLE_PORT:-8100}"
-FRONTEND_HOST="${FRONTEND_HOST:-0.0.0.0}"
-FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-SCICOMM_ARTIFACT_DIR="${SCICOMM_ARTIFACT_DIR:-${ROOT_DIR}/scicomm_embedding}"
-ARTICLE_SERVICE_BASE_URL="${ARTICLE_SERVICE_BASE_URL:-http://localhost:${ARTICLE_PORT}}"
-VITE_API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+FRONTEND_URL="${FRONTEND_URL:-http://134.87.8.193:5173}"
+ARTICLE_SERVICE_BASE_URL="${ARTICLE_SERVICE_BASE_URL:-http://134.87.9.167:8100}"
+CORS_ORIGINS="${CORS_ORIGINS:-${FRONTEND_URL},http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174}"
+SESSION_COOKIE_SECURE="${SESSION_COOKIE_SECURE:-false}"
+INTERNAL_API_TOKEN="${INTERNAL_API_TOKEN:-}"
 
 PIDS=()
 
@@ -111,17 +111,6 @@ kill_port_processes() {
   fi
 }
 
-free_service_ports() {
-  if [[ "$KILL_PORTS" != "1" ]]; then
-    echo "==> Skipping port cleanup. Set KILL_PORTS=1 to enable it."
-    return
-  fi
-
-  kill_port_processes "$ARTICLE_PORT" "Article service"
-  kill_port_processes "$BACKEND_PORT" "Backend"
-  kill_port_processes "$FRONTEND_PORT" "Frontend"
-}
-
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
@@ -137,62 +126,38 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 require_file "${ROOT_DIR}/backend/.venv/bin/activate"
-require_file "${ROOT_DIR}/scicomm_embedding/.venv/bin/activate"
-require_file "${ROOT_DIR}/frontend/node_modules"
 
-free_service_ports
+if [[ "$KILL_PORTS" == "1" ]]; then
+  kill_port_processes "$BACKEND_PORT" "Backend"
+else
+  echo "==> Skipping port cleanup. Set KILL_PORTS=1 to enable it."
+fi
 
 if [[ "$START_DB" == "1" ]]; then
   echo "==> Starting Postgres"
   start_postgres
 fi
 
-missing_artifacts=0
-for artifact in all.sqlite all_specter.index all_metadata.json all_manifest.json; do
-  if [[ ! -f "${SCICOMM_ARTIFACT_DIR}/${artifact}" ]]; then
-    missing_artifacts=1
-  fi
-done
-if [[ "$missing_artifacts" == "1" ]]; then
-  echo "==> Warning: article artifacts are missing in ${SCICOMM_ARTIFACT_DIR}."
-  echo "    Article endpoints will return 503 until you run: cd scicomm_embedding && source .venv/bin/activate && python pipeline.py"
+if [[ -z "$INTERNAL_API_TOKEN" ]]; then
+  echo "==> Warning: INTERNAL_API_TOKEN is empty; /internal/feed-refresh will return 503."
 fi
-
-echo "==> Starting article service on ${ARTICLE_HOST}:${ARTICLE_PORT}"
-(
-  cd "${ROOT_DIR}/scicomm_embedding"
-  source .venv/bin/activate
-  export SCICOMM_ARTIFACT_DIR
-  exec uvicorn article_service.main:app --host "$ARTICLE_HOST" --port "$ARTICLE_PORT"
-) &
-PIDS+=("$!")
 
 echo "==> Starting backend on ${BACKEND_HOST}:${BACKEND_PORT}"
 (
   cd "${ROOT_DIR}/backend"
   source .venv/bin/activate
-  export DATABASE_URL ARTICLE_SERVICE_BASE_URL
+  export DATABASE_URL ARTICLE_SERVICE_BASE_URL CORS_ORIGINS SESSION_COOKIE_SECURE INTERNAL_API_TOKEN
   exec uvicorn app.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT"
-) &
-PIDS+=("$!")
-
-echo "==> Starting frontend on ${FRONTEND_HOST}:${FRONTEND_PORT}"
-(
-  cd "${ROOT_DIR}/frontend"
-  load_env_file_override "${ROOT_DIR}/frontend/.env"
-  export VITE_API_BASE_URL
-  echo "==> Frontend API base URL: ${VITE_API_BASE_URL}"
-  exec npm run dev -- --host "$FRONTEND_HOST" --port "$FRONTEND_PORT" --strictPort
 ) &
 PIDS+=("$!")
 
 echo
 echo "Services started:"
-echo "  Frontend:        http://localhost:${FRONTEND_PORT}"
-echo "  Backend:         http://localhost:${BACKEND_PORT}"
-echo "  Article service: http://localhost:${ARTICLE_PORT}"
+echo "  Backend:             http://localhost:${BACKEND_PORT}"
+echo "  Allowed frontend:    ${FRONTEND_URL}"
+echo "  GPU article service: ${ARTICLE_SERVICE_BASE_URL}"
 echo
-echo "Press Ctrl+C to stop frontend, backend, and article service."
+echo "Press Ctrl+C to stop the backend."
 
 while true; do
   for pid in "${PIDS[@]}"; do
